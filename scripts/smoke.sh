@@ -84,10 +84,14 @@ echo "  -- dangerous content must be stripped --"
 # report reads the same way, so appearance belongs to the viewer alone. The
 # sanitizer's allowCss path still exists and is covered by test-css.sh, but the
 # default (and what ships) drops <style> entirely.
-for pat in "alert(" "onload=" "onclick=" "javascript:" "<script" "<iframe" \
+for pat in "alert(" "onload=" "onclick=" "javascript:" "<iframe" \
            "evil.example.com" "hotpink" "Comic Sans" "bgcolor" 'width="1400"' "document.cookie"; do
   check "stripped: $pat" "$(countf /tmp/rv_report.html "$pat")" "0"
 done
+# The page carries exactly one script -- the viewer's figure renderer. The
+# report's own <script> must not survive, so the count staying at 1 is the
+# assertion that matters.
+check "only the viewer's script" "$(countf /tmp/rv_report.html '<script>')" "1"
 
 echo "  -- report CSS must not reach the page --"
 check "no injected report style block" "$(countf /tmp/rv_report.html 'report-supplied')" "0"

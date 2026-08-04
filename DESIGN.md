@@ -125,6 +125,24 @@ components:
     typography: "{typography.mono}"
     rounded: "{rounded.md}"
     padding: 16px
+  viz-card:
+    backgroundColor: "{colors.neutral}"
+    textColor: "{colors.primary}"
+    rounded: "{rounded.md}"
+    padding: 16px
+  viz-caption:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.faint}"
+    typography: "{typography.label}"
+    padding: 12px
+  bar-track:
+    backgroundColor: "{colors.sunken}"
+    rounded: 999px
+    height: 8px
+  bar-fill:
+    backgroundColor: "{colors.tertiary}"
+    rounded: 999px
+    height: 8px
 ---
 
 ## Overview
@@ -246,6 +264,32 @@ the reader depends on:
 - **`table`** — the workhorse. Numeric columns right-aligned via `.num`.
 - **`.source`** — the provenance line at the end. A research report without
   sources is an opinion.
+- **`figure.viz`** — the frame for a viewer-drawn chart. Carries a `figcaption`
+  and optionally a trailing `.note`. The report supplies values in `data-*`; the
+  viewer draws the graphic, so every chart in the archive looks the same.
+- **`.bars` / `.bar`** — magnitude comparison. `data-value` per row,
+  `data-max` on the group to declare the ceiling, `data-label` for the unit.
+- **`.spark`** — trend shape from `data-points`. Rendered as SVG, **anchored at
+  zero** so a rise from 12 to 58 does not fill the band as if it climbed from
+  nothing.
+- **`ol.timeline`** — ordered process with `data-state` of done/active/todo.
+- **`.versus`** — two-column A/B comparison for cases a table would over-serve.
+
+## Motion
+
+Motion exists to direct attention on first read, never to decorate.
+
+- Figures fade and rise 8px when scrolled into view; bars grow to their value and
+  sparklines draw along their path. Each runs once.
+- Everything is **visible by default** and only animates once JS marks the
+  document, so a script failure degrades to a static, readable figure rather than
+  a blank box.
+- A 2.5s timer force-reveals anything the observer missed, and `beforeprint`
+  reveals everything. A figure parked at `opacity: 0` is indistinguishable from a
+  broken chart — that must never be what the reader sees.
+- `prefers-reduced-motion: reduce` disables all of it; the end state renders
+  immediately.
+- No parallax, no scroll-jacking, no looping animation. A report is read once.
 
 ## Do's and Don'ts
 

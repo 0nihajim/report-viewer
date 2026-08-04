@@ -26,6 +26,24 @@ const UNWRAP = ['html', 'body', 'head', 'meta', 'link', 'base', 'font', 'center'
 /** Attributes allowed to survive on any element. */
 const GLOBAL_ATTRS = new Set(['id', 'class', 'title', 'dir', 'lang']);
 
+/**
+ * Data attributes carry the *values* for viewer-drawn figures (bar rows, trend
+ * lines, timelines). The report supplies numbers and labels; the viewer owns how
+ * they look, which keeps every chart in the archive visually identical.
+ *
+ * Allowlisted by exact name rather than a `data-` prefix match: a blanket prefix
+ * would also admit attributes that framework code or a future feature might
+ * treat as behaviour, and these are the only ones the renderer reads.
+ */
+const DATA_ATTRS = new Set([
+  'data-value', // numeric magnitude for .bar rows
+  'data-max', // optional scale ceiling for a .bars group
+  'data-label', // series/axis label
+  'data-points', // comma-separated series for .spark
+  'data-state', // timeline step state: done | active | todo
+  'data-tone', // semantic accent: positive | caution | critical
+]);
+
 /** Per-tag additional allowed attributes. */
 const TAG_ATTRS: Record<string, Set<string>> = {
   a: new Set(['href', 'target', 'rel']),
@@ -54,6 +72,13 @@ const URL_SAFE = /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/|data:image\/(png|jpe?g
  * paths only.
  */
 const SRC_SAFE = /^(data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|\/|\.\/|\.\.\/)/i;
+
+/**
+ * Permitted shape of a data-* value: digits, separators, and label text without
+ * markup or URL schemes. Keeps `data-points` parseable and stops a data
+ * attribute being used to smuggle content into a renderer.
+ */
+const DATA_VALUE_SAFE = /^[^<>&"'\\]{0,200}$/;
 
 export interface Heading {
   level: number;
@@ -202,8 +227,14 @@ export async function sanitizeReport(
         const allowed = TAG_ATTRS[tag];
         for (const [name, value] of [...el.attributes]) {
           const lower = name.toLowerCase();
-          const ok = GLOBAL_ATTRS.has(lower) || allowed?.has(lower);
+          const ok = GLOBAL_ATTRS.has(lower) || DATA_ATTRS.has(lower) || allowed?.has(lower);
           if (!ok) {
+            el.removeAttribute(name);
+            continue;
+          }
+          // data-* feeds a renderer, so constrain it to numbers, separators and
+          // plain label text. Anything with markup or a scheme is not data.
+          if (DATA_ATTRS.has(lower) && !DATA_VALUE_SAFE.test(value)) {
             el.removeAttribute(name);
             continue;
           }

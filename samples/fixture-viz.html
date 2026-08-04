@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>図表フィクスチャ</title>
+</head>
+<body>
+<h1>図表フィクスチャ</h1>
+
+<figure class="viz">
+  <figcaption>共有率別スループット</figcaption>
+  <div class="vizbody">
+    <div class="bars" data-max="6000" data-label="tok/s">
+      <div class="bar" data-value="2140"><span class="blabel">vLLM</span><span class="bval">2,140</span></div>
+      <div class="bar" data-value="5070" data-tone="positive"><span class="blabel">SGLang</span><span class="bval">5,070</span></div>
+    </div>
+  </div>
+</figure>
+
+<figure class="viz">
+  <figcaption>件数推移</figcaption>
+  <div class="vizbody">
+    <div class="spark" data-points="12,18,15,24,31,29,42,58" data-label="月次件数（件）"></div>
+  </div>
+</figure>
+
+<figure class="viz">
+  <figcaption>稟議の承認経路</figcaption>
+  <div class="vizbody">
+    <ol class="timeline">
+      <li data-state="done"><div class="tstep">起案</div><div class="tmeta">0.5日 — 完了</div></li>
+      <li data-state="active"><div class="tstep">課長承認</div><div class="tmeta">2日 — 進行中</div></li>
+      <li data-state="todo"><div class="tstep">部長承認</div><div class="tmeta">未着手</div></li>
+    </ol>
+  </div>
+</figure>
+
+<figure class="viz">
+  <figcaption>実装方式の比較</figcaption>
+  <div class="vizbody">
+    <div class="versus">
+      <div><h4>vLLM</h4><ul><li>入力多様に強い</li></ul></div>
+      <div><h4>SGLang</h4><ul><li>共通接頭辞に強い</li></ul></div>
+    </div>
+  </div>
+</figure>
+
+<p onclick="alert(1)" data-value="&lt;script&gt;">属性検証: ハンドラと不正なdata値は除去される。</p>
+</body>
+</html>

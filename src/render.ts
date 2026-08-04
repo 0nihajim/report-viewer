@@ -326,6 +326,349 @@ a.card .m {
   line-height: inherit;
 }
 
+/* ---------- viewer-drawn figures ----------
+   The report supplies numbers via data-*; these rules and FIGURE_JS draw them.
+   Same chart look in every report, which per-report CSS could never give.
+   All motion is gated behind prefers-reduced-motion. */
+
+/* Shared figure frame: caption above, content below, hairline border. */
+.report figure.viz {
+  margin: 1.8rem 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  overflow: hidden;
+}
+.report figure.viz > figcaption {
+  font-size: .74rem; font-weight: 700; letter-spacing: .07em;
+  color: var(--fg-faint);
+  padding: .7rem .9rem .6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.report figure.viz .vizbody { padding: .95rem .9rem 1rem; }
+.report figure.viz .note {
+  font-size: .76rem; color: var(--fg-faint); line-height: 1.6;
+  padding: 0 .9rem .85rem;
+}
+
+/* --- horizontal bars: the workhorse for "compare these magnitudes" --- */
+.report .bars { display: grid; gap: .7rem; }
+.report .bar { display: grid; grid-template-columns: 1fr auto; gap: .15rem .6rem; }
+.report .bar .blabel {
+  font-size: .84rem; color: var(--fg); grid-column: 1;
+  overflow-wrap: anywhere;
+}
+.report .bar .bval {
+  font-family: var(--mono); font-size: .84rem; font-variant-numeric: tabular-nums;
+  color: var(--fg-muted); grid-column: 2; white-space: nowrap;
+}
+.report .bar .btrack {
+  grid-column: 1 / -1;
+  height: 8px; border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.report .bar .bfill {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--accent);
+  /* Set by FIGURE_JS; starts at 0 so the grow animation has somewhere to go. */
+  width: 0;
+  transition: width .9s cubic-bezier(.22, .61, .36, 1);
+}
+.report .bar[data-tone="positive"] .bfill { background: var(--positive); }
+.report .bar[data-tone="caution"]  .bfill { background: var(--caution); }
+.report .bar[data-tone="critical"] .bfill { background: var(--critical); }
+
+/* Scale footer: without it a bar that stops at 85% looks like a bug rather than
+   a value measured against a declared ceiling. */
+.report .bars + .scale,
+.report .scale {
+  display: flex; justify-content: space-between;
+  margin-top: .55rem; padding-top: .4rem;
+  border-top: 1px solid var(--border);
+  font-size: .7rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- sparkline: trend shape, not precise values --- */
+.report .spark { display: block; width: 100%; height: 58px; overflow: visible; }
+.report .spark .sline {
+  fill: none; stroke: var(--accent); stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  /* Drawn on reveal by animating the dash offset. */
+  stroke-dasharray: var(--len) var(--len);
+  stroke-dashoffset: var(--len);
+  transition: stroke-dashoffset 1.1s ease-out;
+}
+.report .spark .sarea { fill: var(--accent-soft); opacity: 0; transition: opacity .8s ease-out .3s; }
+.report .spark .sdot { fill: var(--accent); opacity: 0; transition: opacity .3s ease-out .9s; }
+.report .spark .sbase { stroke: var(--border); stroke-width: 1; }
+.report .sparkfoot {
+  display: flex; justify-content: space-between;
+  font-size: .72rem; color: var(--fg-faint); margin-top: .3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- timeline / process: ordered steps with state --- */
+.report ol.timeline { list-style: none; margin: 0; padding: 0; }
+/* A timeline used directly in the article (not wrapped in figure.viz) needs its
+   own frame, or the container rhythm breaks halfway down the page. */
+.report > ol.timeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin: 1.8rem 0; padding: 1rem 1rem .3rem;
+}
+.report ol.timeline > li {
+  position: relative;
+  padding: 0 0 1.05rem 1.6rem;
+  margin: 0;
+}
+.report ol.timeline > li::before {
+  content: ""; position: absolute; left: 0; top: .42rem;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--border);
+  z-index: 1;
+}
+/* Connector runs between dots, stopping at the last item. */
+.report ol.timeline > li:not(:last-child)::after {
+  content: ""; position: absolute;
+  left: 4px; top: 1.15rem; bottom: -.1rem;
+  width: 1px; background: var(--border);
+}
+.report ol.timeline > li[data-state="done"]::before {
+  background: var(--accent); border-color: var(--accent);
+}
+.report ol.timeline > li[data-state="active"]::before {
+  background: var(--bg); border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.report ol.timeline .tstep { font-weight: 660; font-size: .95rem; }
+.report ol.timeline .tmeta {
+  font-size: .78rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.report ol.timeline > li[data-state="todo"] .tstep { color: var(--fg-muted); }
+
+/* --- two-column comparison: "A vs B" without a table --- */
+.report .versus {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 1.8rem 0;
+}
+.report .versus > div { background: var(--bg); padding: .85rem .9rem; }
+/* Inside figure.viz the card already provides the frame; avoid a double border. */
+.report figure.viz .versus,
+.report figure.viz ol.timeline {
+  border: none; border-radius: 0; margin: 0; padding: 0;
+}
+.report .versus h4 {
+  margin: 0 0 .45rem; font-size: .8rem; letter-spacing: .04em;
+  color: var(--fg-faint); font-weight: 700;
+}
+.report .versus ul { margin: 0; padding-left: 1.1rem; }
+.report .versus li { font-size: .87rem; margin: .3rem 0; }
+@media (max-width: 30rem) {
+  .report .versus { grid-template-columns: 1fr; }
+}
+
+/* Reveal-on-scroll: content is visible by default and only animates when JS has
+   marked it, so a JS failure degrades to a static, readable figure. */
+.report .reveal { opacity: 1; }
+.report .js .reveal, .js .report .reveal {
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .5s ease-out, transform .5s ease-out;
+}
+.js .report .reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .report .bar .bfill,
+  .report .spark .sline,
+  .report .spark .sarea,
+  .report .spark .sdot,
+  .js .report .reveal { transition: none; }
+  .js .report .reveal { opacity: 1; transform: none; }
+  .report .spark .sline { stroke-dashoffset: 0; }
+  .report .spark .sarea, .report .spark .sdot { opacity: 1; }
+}
+`;
+
+/**
+ * Draws the data-* driven figures and runs reveal-on-scroll.
+ *
+ * Runs on the report page only. Everything degrades to readable static content
+ * if this never executes: bars keep their value as text, sparklines are replaced
+ * rather than enhanced, and .reveal stays opaque until the `js` class is set.
+ */
+const FIGURE_JS = `
+(function(){
+  var d = document;
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  d.documentElement.classList.add('js');
+
+  function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
+
+  // --- bars: width comes from data-value against the group's max ---
+  Array.prototype.forEach.call(d.querySelectorAll('.report .bars'), function(group){
+    var rows = [].slice.call(group.querySelectorAll('.bar'));
+    var declared = num(group.getAttribute('data-max'));
+    var max = declared > 0 ? declared : rows.reduce(function(m, r){
+      return Math.max(m, num(r.getAttribute('data-value')));
+    }, 0);
+    if (max <= 0) max = 1;
+    rows.forEach(function(r){
+      var track = r.querySelector('.btrack');
+      if (!track) {
+        track = d.createElement('span');
+        track.className = 'btrack';
+        track.appendChild(d.createElement('span')).className = 'bfill';
+        r.appendChild(track);
+      }
+      var fill = track.querySelector('.bfill');
+      var pct = Math.max(0, Math.min(100, (num(r.getAttribute('data-value')) / max) * 100));
+      fill.setAttribute('data-pct', pct);
+      // aria: the bar is decorative; the value is already in .bval text.
+      track.setAttribute('aria-hidden', 'true');
+      if (reduce) fill.style.width = pct + '%';
+    });
+
+    // State the ceiling. A bar stopping at 85% is otherwise indistinguishable
+    // from a rendering bug.
+    if (rows.length && !group.nextElementSibling?.classList.contains('scale')) {
+      var sc = d.createElement('div');
+      sc.className = 'scale';
+      var unit = group.getAttribute('data-label') || '';
+      sc.innerHTML = '<span>0</span><span>' +
+        max.toLocaleString('ja-JP') + (unit ? ' ' + unit : '') + '</span>';
+      group.parentNode.insertBefore(sc, group.nextSibling);
+    }
+  });
+
+  // --- sparklines: replace the placeholder with an SVG path ---
+  Array.prototype.forEach.call(d.querySelectorAll('.report .spark'), function(host){
+    var pts = (host.getAttribute('data-points') || '').split(',')
+      .map(function(s){ return parseFloat(s); })
+      .filter(function(n){ return isFinite(n); });
+    if (pts.length < 2) return;
+
+    var W = 300, H = 58, P = 4;
+    // Extra right inset so the terminal dot does not touch the card padding.
+    var RP = 7;
+    var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
+    // Anchor the vertical scale at zero unless the series goes negative.
+    // Scaling from the minimum makes a 12->58 rise fill the whole band as if it
+    // climbed from nothing, which exaggerates the slope and misleads.
+    var base = lo < 0 ? lo : 0;
+    var top = hi === base ? base + 1 : hi;
+    var span = top - base;
+    var xy = pts.map(function(v, i){
+      return [
+        P + (i / (pts.length - 1)) * (W - P - RP),
+        P + (1 - (v - base) / span) * (H - P * 2)
+      ];
+    });
+    var line = xy.map(function(p, i){
+      return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+    }).join(' ');
+    var area = line + ' L' + xy[xy.length - 1][0].toFixed(1) + ' ' + (H - P) +
+               ' L' + xy[0][0].toFixed(1) + ' ' + (H - P) + ' Z';
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = d.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('class', 'spark');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', host.getAttribute('data-label') || '推移');
+
+    var ap = d.createElementNS(NS, 'path');
+    ap.setAttribute('d', area); ap.setAttribute('class', 'sarea');
+    var lp = d.createElementNS(NS, 'path');
+    lp.setAttribute('d', line); lp.setAttribute('class', 'sline');
+    var last = xy[xy.length - 1];
+    var dot = d.createElementNS(NS, 'circle');
+    dot.setAttribute('cx', last[0].toFixed(1));
+    dot.setAttribute('cy', last[1].toFixed(1));
+    dot.setAttribute('r', '3'); dot.setAttribute('class', 'sdot');
+
+    // Baseline sits at the zero anchor, so the area reads against a real datum.
+    var axis = d.createElementNS(NS, 'line');
+    axis.setAttribute('x1', P); axis.setAttribute('x2', W - RP);
+    axis.setAttribute('y1', H - P); axis.setAttribute('y2', H - P);
+    axis.setAttribute('class', 'sbase');
+
+    svg.appendChild(axis); svg.appendChild(ap); svg.appendChild(lp); svg.appendChild(dot);
+    host.parentNode.replaceChild(svg, host);
+
+    // Axis labels: state the range and the unit, or the shape is decorative.
+    // Ends are marked so 12/58 aren't misread as first/last x values.
+    var unit = host.getAttribute('data-label') || '';
+    var m = unit.match(/[（(]([^）)]+)[）)]\s*$/);
+    var suffix = m ? m[1] : '';
+    var foot = d.createElement('div');
+    foot.className = 'sparkfoot';
+    foot.innerHTML = '<span>最小 ' + lo.toLocaleString('ja-JP') + suffix + '</span>' +
+                     '<span>最大 ' + hi.toLocaleString('ja-JP') + suffix + '</span>';
+    svg.parentNode.insertBefore(foot, svg.nextSibling);
+
+    // Dash length must be measured after insertion.
+    var len = lp.getTotalLength ? lp.getTotalLength() : 0;
+    lp.style.setProperty('--len', len);
+    if (reduce) { lp.style.strokeDashoffset = '0'; ap.style.opacity = 1; dot.style.opacity = 1; }
+  });
+
+  // --- reveal on scroll, and trigger the figure animations at that moment ---
+  function activate(el){
+    el.classList.add('in');
+    Array.prototype.forEach.call(el.querySelectorAll('.bfill'), function(f){
+      f.style.width = (f.getAttribute('data-pct') || 0) + '%';
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.sline'), function(l){
+      l.style.strokeDashoffset = '0';
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.sarea, .sdot'), function(n){
+      n.style.opacity = '1';
+    });
+  }
+
+  var targets = [].slice.call(d.querySelectorAll('.report figure.viz, .report .reveal'));
+  targets.forEach(function(t){ t.classList.add('reveal'); });
+
+  if (reduce || !('IntersectionObserver' in window)) {
+    targets.forEach(activate);
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) { activate(e.target); io.unobserve(e.target); }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.15 });
+  targets.forEach(function(t){ io.observe(t); });
+
+  // Safety net: anything still waiting after 2.5s gets activated regardless.
+  // A figure parked at opacity:0 is indistinguishable from a broken chart, and
+  // that is exactly what a full-page screenshot, a print, or a fast scroll past
+  // the observer's threshold produces.
+  setTimeout(function(){
+    targets.forEach(function(t){
+      if (!t.classList.contains('in')) { activate(t); io.unobserve(t); }
+    });
+  }, 2500);
+
+  // Print must never show a blank box.
+  var mql = matchMedia('print');
+  function onPrint(){ targets.forEach(activate); }
+  if (mql.addEventListener) mql.addEventListener('change', onPrint);
+  window.addEventListener('beforeprint', onPrint);
+})();
+`;
+
+/** Shell chrome: TOC, footer, print rules. Appended to BASE_CSS. */
+const CHROME_CSS = `
 /* ---------- table of contents ---------- */
 details.toc {
   margin: 1.5rem 0 2rem; background: var(--bg-elev);
@@ -377,6 +720,12 @@ footer a { color: var(--fg-muted); }
 @media print {
   .top, details.toc, footer { display: none; }
   body { font-size: 11pt; }
+  /* Reveal-on-scroll never fires for a print render, so force figures visible.
+     Bar widths still come from JS via beforeprint. */
+  .js .report .reveal { opacity: 1 !important; transform: none !important; }
+  .report figure.viz { break-inside: avoid; }
+  .report .spark .sline { stroke-dashoffset: 0 !important; }
+  .report .spark .sarea, .report .spark .sdot { opacity: 1 !important; }
 }
 `;
 
@@ -387,6 +736,8 @@ function layout(opts: {
   showHome: boolean;
   /** Sanitized, .report-scoped CSS supplied by the report itself. */
   reportCss?: string;
+  /** Inline script appended before </body> (figure drawing, list filtering). */
+  script?: string;
 }): string {
   return `<!doctype html>
 <html lang="ja">
@@ -401,7 +752,7 @@ function layout(opts: {
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="apple-touch-icon" href="/icon.png">
 <title>${esc(opts.title)}</title>
-<style>${BASE_CSS}</style>
+<style>${BASE_CSS}${CHROME_CSS}</style>
 ${opts.reportCss ? `<style>/* report-supplied, sanitized + scoped to .report */\n${opts.reportCss}</style>` : ''}
 </head>
 <body>
@@ -422,6 +773,7 @@ ${opts.reportCss ? `<style>/* report-supplied, sanitized + scoped to .report */\
     <span>Cloudflare Access で保護された非公開ビューア</span>
   </footer>
 </div>
+${opts.script ? `<script>${opts.script}</script>` : ''}
 </body>
 </html>`;
 }
@@ -489,10 +841,9 @@ ${reports
   })
   .join('\n')}
   </ul>
-  <p class="empty" id="nohit" hidden>該当するレポートがありません。</p>
-  <script>${LIST_JS}</script>`;
+  <p class="empty" id="nohit" hidden>該当するレポートがありません。</p>`;
 
-  return layout({ title: siteTitle, siteTitle, body, showHome: false });
+  return layout({ title: siteTitle, siteTitle, body, showHome: false, script: LIST_JS });
 }
 
 export function renderReport(
@@ -529,7 +880,7 @@ ${tocItems
 ${heading}${contentHtml}
   </article>`;
 
-  return layout({ title: meta.title, siteTitle, body, showHome: true, reportCss });
+  return layout({ title: meta.title, siteTitle, body, showHome: true, reportCss, script: FIGURE_JS });
 }
 
 export function renderManifest(siteTitle: string): string {

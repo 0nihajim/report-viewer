@@ -72,8 +72,11 @@ for id in "${IDS[@]}"; do
   tw=$(grep -o '<div class="tw"><table' "/tmp/rv_c_$id.html" | wc -l | tr -d ' ')
   tb=$(grep -o '<table' "/tmp/rv_c_$id.html" | wc -l | tr -d ' ')
   check "$id all tables wrapped" "$tw" "$tb"
-  # Forbidden constructs must not survive into the rendered page.
-  for pat in '<script' 'style=' 'bgcolor' 'onload='; do
+  # Exactly one script: the viewer's figure renderer. A second one would mean a
+  # report smuggled its own in.
+  s=$(grep -o '<script>' "/tmp/rv_c_$id.html" | wc -l | tr -d ' ')
+  check "$id one viewer script" "$s" "1"
+  for pat in 'style=' 'bgcolor' 'onload=' 'javascript:'; do
     n=$(grep -o -F -- "$pat" "/tmp/rv_c_$id.html" | wc -l | tr -d ' ')
     check "$id stripped $pat" "$n" "0"
   done

@@ -53,6 +53,19 @@
 <p>プロンプトのハッシュやリクエスト ID をメトリクスのラベルに入れると、時系列数が線形に増えてバックエンドを圧迫する。これらは span 属性に留め、メトリクスのラベルはモデル名と結果区分程度に抑える。</p>
 
 <h2>パイプラインの責務分担</h2>
+
+<figure class="viz">
+  <figcaption>テレメトリの流れと責務</figcaption>
+  <div class="vizbody">
+    <ol class="timeline">
+      <li data-state="done"><div class="tstep">SDK で計装</div><div class="tmeta">span 生成 — 自動計装の範囲を確認</div></li>
+      <li data-state="done"><div class="tstep">Collector で加工</div><div class="tmeta">PII 除去とサンプリング — ここが要</div></li>
+      <li data-state="active"><div class="tstep">Backend に保存</div><div class="tmeta">カーディナリティ管理 — 運用中</div></li>
+    </ol>
+  </div>
+  <p class="note">本文の削除を SDK 設定に依存させない。Collector で落とすのが要点。</p>
+</figure>
+
 <table>
   <thead>
     <tr><th>レイヤ</th><th>役割</th><th>ここで扱うもの</th></tr>

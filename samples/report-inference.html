@@ -39,6 +39,25 @@
 <h3>共有率による逆転</h3>
 <p>共有率が低い領域では両者の差は5%以内に収まり、選定理由にならない。40%を境に SGLang が離れ始め、80%付近で2.3倍に達した。エージェント用途では会話履歴が共通プレフィックスになるため、この高共有率帯に入りやすい。</p>
 
+<figure class="viz">
+  <figcaption>共有率80%時のスループット</figcaption>
+  <div class="vizbody">
+    <div class="bars" data-max="6000" data-label="tok/s">
+      <div class="bar" data-value="2205"><span class="blabel">vLLM</span><span class="bval">2,205</span></div>
+      <div class="bar" data-value="5070" data-tone="positive"><span class="blabel">SGLang</span><span class="bval">5,070</span></div>
+    </div>
+  </div>
+  <p class="note">同一ハードウェア・同一モデルで測定。バーは 0〜6,000 tok/s の共通スケール。</p>
+</figure>
+
+<figure class="viz">
+  <figcaption>共有率に対する SGLang 優位度</figcaption>
+  <div class="vizbody">
+    <div class="spark" data-points="0.98,1.02,1.14,1.52,1.83,2.05,2.19,2.30" data-label="対vLLM比（倍）"></div>
+  </div>
+  <p class="note">共有率 5% 刻みで測定。1.0 は同等、40% を超えた地点から差が開く。</p>
+</figure>
+
 <table>
   <thead>
     <tr><th>共有率</th><th class="num">vLLM (tok/s)</th><th class="num">SGLang (tok/s)</th><th class="num">比</th><th>判断</th></tr>
