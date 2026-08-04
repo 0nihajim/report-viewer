@@ -335,9 +335,29 @@ details.toc {
 details.toc > summary {
   cursor: pointer; font-weight: 640; font-size: .92rem;
   padding: .6rem 0; list-style: none;
+  display: flex; align-items: center; gap: .5rem;
 }
 details.toc > summary::-webkit-details-marker { display: none; }
-details.toc > summary::before { content: "☰  "; color: var(--fg-faint); }
+/* A collapsed panel showing only a label reads as an empty broken box — three
+   separate reviews reported this TOC as "empty". The chevron is the affordance
+   that says it opens, and it rotates to show state. */
+details.toc > summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 1.25rem; line-height: 1;
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+details.toc[open] > summary::after { transform: rotate(-90deg); }
+/* Item count so the reader knows there is something inside before opening. */
+details.toc > summary .n {
+  font-weight: 400; font-size: .82rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  details.toc > summary::after { transition: none; }
+}
 details.toc ol { list-style: none; margin: 0 0 .6rem; padding-left: .2rem; }
 details.toc li { margin: .1rem 0; }
 details.toc a {
@@ -486,7 +506,7 @@ export function renderReport(
   const tocItems = headings.filter((h) => h.level >= 2);
   const toc =
     tocItems.length >= 3
-      ? `<details class="toc"><summary>目次</summary><ol>
+      ? `<details class="toc"><summary>目次<span class="n">${tocItems.length}項目</span></summary><ol>
 ${tocItems
   .map((h) => `  <li class="lv${h.level}"><a href="#${esc(h.id)}">${esc(h.text)}</a></li>`)
   .join('\n')}
