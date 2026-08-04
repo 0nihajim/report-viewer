@@ -17,9 +17,14 @@ check() {
 
 python3 - > /tmp/rv_esc.json <<'PY'
 import json
+# Note the hard-wrapped lines: the newline+indent is what the browser collapses
+# into a visible space between CJK characters.
 html = """<html><body><h1>エスケープ検証</h1>
 <p>比較演算子 は a &lt; b および a &gt; b である。 次の文。 そして &amp; 記号。</p>
 <p>危険な文字列 &lt;script&gt;alert(1)&lt;/script&gt; を含む文。 続く文。</p>
+<p>改行で折り返された文である。
+  次の行に続く文。
+  さらに続く文。</p>
 <pre><code>if a &lt; b:
     x = 1   # 空白 は  保持   される
 </code></pre>
@@ -48,6 +53,17 @@ echo "=== CJK tightening applied outside code ==="
 check "'。 次の文' tightened"     "$(cnt '。 次の文')" "0"
 check "'。次の文' present"        "$(cnt '。次の文')" "1"
 check "'。 続く文' tightened"     "$(cnt '。 続く文')" "0"
+# Newline-wrapped prose is the common real-world case: the browser collapses
+# "。\n  次の行" into a visible space, so newlines must be tightened too.
+check "newline gap tightened"     "$(cnt 'である。次の行に続く文。さらに続く文。')" "1"
+check "no residual newline gap" \
+  "$(python3 -c "
+import re,sys
+h=open('/tmp/rv_esc.html',encoding='utf-8').read()
+b=re.sub(r'<pre.*?</pre>','',h,flags=re.S)
+CJK=r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff\u3000-\u303f'
+print(len(re.findall(rf'[{CJK}]\s+[{CJK}]',b)))
+")" "0"
 
 echo "=== latin spacing preserved ==="
 # "演算子 は" is CJK on both sides, so it is *correctly* tightened. Use a real

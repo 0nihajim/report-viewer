@@ -254,7 +254,10 @@ export function esc(s: string): string {
  */
 const CJK =
   '\\u3000-\\u303f\\u3040-\\u309f\\u30a0-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uff00-\\uff60\\uffe0-\\uffe6';
-const CJK_GAP = new RegExp(`([${CJK}])[ \\t]+(?=[${CJK}])`, 'g');
+// Whitespace here must include newlines and tabs: generators hard-wrap prose in
+// the source, and the browser collapses "。\n  本レポート" into "。 本レポート".
+// Matching only literal spaces left those gaps on screen.
+const CJK_GAP = new RegExp(`([${CJK}])[ \\t\\r\\n\\f\\v]+(?=[${CJK}])`, 'g');
 
 export function tightenCjk(text: string): string {
   // Two passes: a single pass misses runs like "。 、 あ" where matches overlap.
