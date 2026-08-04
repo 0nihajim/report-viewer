@@ -40,7 +40,20 @@ const TAG_ATTRS: Record<string, Set<string>> = {
   input: new Set(['type', 'checked', 'disabled']),
 };
 
+/**
+ * Schemes allowed on a *navigational* attribute (href). A link is inert until
+ * the reader clicks it, so external destinations are fine.
+ */
 const URL_SAFE = /^(https?:|mailto:|tel:|#|\/|\.\/|\.\.\/|data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,)/i;
+
+/**
+ * Schemes allowed on a *subresource* attribute (src). These fetch automatically
+ * on render, so an external URL leaks the fact that the report was opened —
+ * a tracking pixel in a generated report would phone home to whoever wrote it,
+ * from inside an Access-protected session. Inline data: images and same-origin
+ * paths only.
+ */
+const SRC_SAFE = /^(data:image\/(png|jpe?g|gif|webp|svg\+xml);base64,|\/|\.\/|\.\.\/)/i;
 
 export interface Heading {
   level: number;
@@ -82,7 +95,11 @@ function slugifyHeading(text: string, used: Set<string>): string {
  * Sanitize a full HTML document into an embeddable fragment.
  * Returns the fragment, its headings, and a discovered title.
  */
-export async function sanitizeReport(source: string): Promise<SanitizeResult> {
+export async function sanitizeReport(
+  source: string,
+  opts: { allowCss?: boolean } = {},
+): Promise<SanitizeResult> {
+  const allowCss = opts.allowCss === true;
   const headings: Heading[] = [];
   const usedIds = new Set<string>();
   let docTitle: string | null = null;
@@ -190,8 +207,11 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
             el.removeAttribute(name);
             continue;
           }
-          // Reject unsafe URL schemes (javascript:, vbscript:, data:text/html...).
-          if ((lower === 'href' || lower === 'src') && !URL_SAFE.test(value.trim())) {
+          // Reject unsafe URL schemes. src is checked more strictly than href
+          // because a subresource fetches on render without user intent.
+          if (lower === 'href' && !URL_SAFE.test(value.trim())) {
+            el.removeAttribute(name);
+          } else if (lower === 'src' && !SRC_SAFE.test(value.trim())) {
             el.removeAttribute(name);
           }
         }
@@ -267,7 +287,14 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
 
   // Scope author CSS to the article container so a report can restyle itself
   // without reaching the viewer chrome.
-  const css = cssBuf.length ? sanitizeCss(cssBuf.join('\n'), '.report') : '';
+  //
+  // Disabled by default. The archive's whole value is that every report reads the
+  // same way, and per-report palettes destroyed that -- pages stopped feeling
+  // like chapters of one book. Reports now supply structure and the viewer owns
+  // appearance (see DESIGN.md + the kiroku-report skill). The machinery stays
+  // because it is tested and cheap to re-enable for a one-off, but the default
+  // is off and `allowCss` must be passed explicitly.
+  const css = allowCss && cssBuf.length ? sanitizeCss(cssBuf.join('\n'), '.report') : '';
 
   return { html, headings, title: docTitle, css };
 }

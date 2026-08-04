@@ -2,56 +2,82 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>LLMサービングの推論最適化: vLLMとSGLangの比較</title>
+  <title>LLM推論サーバの選定</title>
 </head>
 <body>
-  <h1>LLMサービングの推論最適化: vLLMとSGLangの比較</h1>
 
-  <p>本レポートは、実運用における LLM 推論サーバの選定を目的として、
-  <strong>vLLM</strong> と <strong>SGLang</strong> のスループット特性を整理したものである。</p>
+<p class="eyebrow">推論・サービング</p>
+<h1>LLM推論サーバの選定</h1>
+<p class="lede">プレフィックス共有率が40%を超えるワークロードでは SGLang が優位で、それ未満では vLLM が安定する。</p>
 
-  <h2>1. 前提</h2>
-  <p>計測は単一ノード A100 80GB×1、モデルは 14B 級の dense モデルを想定した。
-  入力長は 1,024 トークン、出力長は 256 トークンで固定している。</p>
+<div class="figures">
+  <div class="figure">
+    <div class="figure-label">計測構成</div>
+    <div class="figure-value">A100<span class="unit">×1</span></div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">モデル規模</div>
+    <div class="figure-value">14<span class="unit">B</span></div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">最大スループット差</div>
+    <div class="figure-value">2.3<span class="unit">倍</span></div>
+    <div class="figure-delta up">SGLang 優位時</div>
+  </div>
+</div>
 
-  <h3>1.1 評価軸</h3>
-  <ul>
-    <li>スループット（tokens/sec）: バッチ処理時の総処理量</li>
-    <li>TTFT（Time To First Token）: 対話用途での体感速度</li>
-    <li>メモリ効率: KVキャッシュの利用効率</li>
-  </ul>
+<h2>計測条件</h2>
+<p>入力1,024トークン・出力256トークンで固定し、同時リクエスト数を8から256まで変化させた。プレフィックス共有率は、リクエスト間で先頭から一致するトークン数の平均を入力長で割った値として定義する。</p>
 
-  <h2>2. アーキテクチャの違い</h2>
-  <p>vLLM は <code>PagedAttention</code> により KV キャッシュを固定サイズのブロックに分割し、
-  断片化を抑制する。一方 SGLang は <code>RadixAttention</code> によって
-  プレフィックスを共有するリクエスト間で KV キャッシュを再利用する。</p>
+<div class="callout note">
+  <p>両者とも prefix caching を有効化しただけでスループットが改善する場合がある。比較の前に <strong>設定の対称性</strong>を確認しないと、実装差ではなく設定差を測ることになる。</p>
+</div>
 
-  <blockquote>プレフィックスの共有率が高いワークロードでは、RadixAttention の効果が支配的になる。</blockquote>
+<h2>アーキテクチャの差</h2>
+<p>vLLM は PagedAttention により KV キャッシュを固定サイズのブロックに分割し、断片化を抑える。SGLang は RadixAttention でプレフィックスを共有するリクエスト間のキャッシュを再利用する。前者は入力が多様なときに効き、後者は入力が似ているときに効く。</p>
 
-  <h3>2.1 使い分けの指針</h3>
-  <table border="1">
-    <thead>
-      <tr><th>ワークロード</th><th>推奨</th><th>理由</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>バッチ推論（多様な入力）</td><td>vLLM</td><td>連続バッチングが安定</td></tr>
-      <tr><td>Few-shotプロンプト固定</td><td>SGLang</td><td>プレフィックス再利用が効く</td></tr>
-      <tr><td>エージェント（長い共通履歴）</td><td>SGLang</td><td>会話履歴の再計算を回避</td></tr>
-      <tr><td>構造化出力が必須</td><td>SGLang</td><td>文法制約デコードが高速</td></tr>
-    </tbody>
-  </table>
+<h3>共有率による逆転</h3>
+<p>共有率が低い領域では両者の差は5%以内に収まり、選定理由にならない。40%を境に SGLang が離れ始め、80%付近で2.3倍に達した。エージェント用途では会話履歴が共通プレフィックスになるため、この高共有率帯に入りやすい。</p>
 
-  <h2>3. 起動例</h2>
-  <pre><code>python -m vllm.entrypoints.openai.api_server \
+<table>
+  <thead>
+    <tr><th>共有率</th><th class="num">vLLM (tok/s)</th><th class="num">SGLang (tok/s)</th><th class="num">比</th><th>判断</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>10% 未満</td><td class="num">2,140</td><td class="num">2,090</td><td class="num">0.98</td><td>差なし</td></tr>
+    <tr><td>40%</td><td class="num">2,180</td><td class="num">3,320</td><td class="num">1.52</td><td>SGLang</td></tr>
+    <tr><td>80%</td><td class="num">2,205</td><td class="num">5,070</td><td class="num">2.30</td><td>SGLang</td></tr>
+  </tbody>
+</table>
+
+<h2>用途別の指針</h2>
+<table>
+  <thead>
+    <tr><th>ワークロード</th><th>推奨</th><th>理由</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>バッチ推論（入力多様）</td><td>vLLM</td><td>連続バッチングが安定</td></tr>
+    <tr><td>Few-shot プロンプト固定</td><td>SGLang</td><td>プレフィックス再利用が効く</td></tr>
+    <tr><td>エージェント（長い共通履歴）</td><td>SGLang</td><td>会話履歴の再計算を回避</td></tr>
+    <tr><td>構造化出力が必須</td><td>SGLang</td><td>文法制約デコードが高速</td></tr>
+  </tbody>
+</table>
+
+<h3>起動例</h3>
+<pre><code>python -m vllm.entrypoints.openai.api_server \
   --model Qwen/Qwen2.5-14B-Instruct \
   --max-model-len 8192 \
   --gpu-memory-utilization 0.92 \
   --enable-prefix-caching</code></pre>
 
-  <h2>4. 結論</h2>
-  <p>プレフィックス共有が見込めるエージェント用途では SGLang、
-  入力が多様なバッチ用途では vLLM が有利という結果になった。
-  なお両者とも prefix caching を有効化するだけで大きく改善する場合があるため、
-  まずはその設定を確認すべきである。</p>
+<div class="callout warn">
+  <p>TTFT とスループットは同時に最適化できない。対話用途で TTFT を優先すると最大バッチサイズを下げる必要があり、総処理量は落ちる。どちらを指標にするか先に決めること。</p>
+</div>
+
+<h2>結論</h2>
+<p>選定の分岐点はモデルでもハードウェアでもなく、ワークロードのプレフィックス共有率である。自社トラフィックの共有率を測れば、比較実験を回す前に候補は絞れる。</p>
+
+<p class="source">出典: 自社検証 (2026-07、A100 80GB×1、vLLM 0.9.x / SGLang 0.4.x)。数値は各条件3回試行の中位値。共有率はリクエストログ10万件からの実測分布に基づく。</p>
+
 </body>
 </html>

@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>サニタイズ検証用フィクスチャ</title>
+  <!-- Deliberately hostile: this file exists to prove the sanitizer strips
+       everything a badly-behaved generator might emit. It intentionally
+       violates the kiroku-report skill and must NOT be used as an example.
+       scripts/lint-report.sh is expected to fail on it. -->
+  <style>
+    body { background: hotpink; font-family: "Comic Sans MS", cursive; }
+    .escape { position: fixed; top: 0; z-index: 99999; }
+    @import url("https://evil.example.com/leak.css");
+  </style>
+  <link rel="stylesheet" href="https://evil.example.com/x.css">
+  <script>alert('xss-1'); document.cookie;</script>
+</head>
+<body bgcolor="hotpink" onload="alert('xss-2')">
+
+<h1>サニタイズ検証用フィクスチャ</h1>
+
+<p onclick="alert('xss-3')" style="color: hotpink; font-size: 40px">
+  インラインハンドラとインラインスタイルを持つ段落。
+</p>
+
+<p>危険なリンク: <a href="javascript:alert('xss-4')">クリック</a>、
+外部リンク: <a href="https://arxiv.org/abs/2601.05111">関連論文</a>、
+内部リンク: <a href="#1-背景と課題">内部</a>。</p>
+
+<iframe src="https://evil.example.com/frame"></iframe>
+<object data="https://evil.example.com/o"></object>
+<embed src="https://evil.example.com/e">
+
+<h2>1. 背景と課題</h2>
+<p>本文。実体参照の検証: a &lt; b および a &gt; b、そして &amp; 記号。</p>
+
+<blockquote>引用ブロックは構造として保持されるべきである。</blockquote>
+
+<h3>1.1 節</h3>
+<p>本文。</p>
+
+<h3>1.2 節</h3>
+<ul><li>項目1</li><li>項目2</li></ul>
+
+<h2>2. 手法の比較</h2>
+<!-- A 1400px table is the classic way a generated report breaks a phone. -->
+<table width="1400" bgcolor="#ffeeff" border="1">
+  <thead>
+    <tr><th>手法</th><th>対象能力</th><th>再現性</th><th>コスト</th><th>備考</th></tr>
+  </thead>
+  <tbody>
+    <tr><td width="400">静的ベンチマーク</td><td>単発推論</td><td>高</td><td>低</td><td>飽和が進行</td></tr>
+    <tr><td>サンドボックス実行</td><td>ツール利用</td><td>中</td><td>高</td><td>環境構築が重い</td></tr>
+  </tbody>
+</table>
+
+<h2>3. 実装例</h2>
+<pre><code>if a &lt; b:
+    x = 1   # 空白 は  保持   される
+</code></pre>
+
+<h2>4. 結論</h2>
+<p>本文。</p>
+<p><img src="https://evil.example.com/pixel.gif" alt="危険な画像"></p>
+<p><font color="hotpink" size="7">font タグ</font></p>
+
+</body>
+</html>

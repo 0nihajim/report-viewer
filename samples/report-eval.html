@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>AIエージェント評価手法の動向</title>
+</head>
+<body>
+
+<p class="eyebrow">評価・ベンチマーク</p>
+<h1>AIエージェント評価手法の動向</h1>
+<p class="lede">静的ベンチマークは上位モデル間の識別力を失い、軌跡を採点する方式へ移行が進んでいる。</p>
+
+<div class="figures">
+  <div class="figure">
+    <div class="figure-label">調査対象</div>
+    <div class="figure-value">42<span class="unit">本</span></div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">軌跡ベース</div>
+    <div class="figure-value">61<span class="unit">%</span></div>
+    <div class="figure-delta up">前期比 +23pt</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">飽和済みBM</div>
+    <div class="figure-value">7<span class="unit">件</span></div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">再現性報告</div>
+    <div class="figure-value">29<span class="unit">%</span></div>
+    <div class="figure-delta down">依然低位</div>
+  </div>
+</div>
+
+<h2>背景</h2>
+<p>単発タスクの正答率を測る評価は、主要モデルが揃って90%を超えた時点で比較の道具として機能しなくなった。差が出ないのではなく、差が出る領域を測っていない。エージェントの実力はツールをどう選び、失敗からどう復帰するかに現れるが、最終回答のみを見る採点はその過程を捨てている。</p>
+
+<div class="callout note">
+  <p>ベンチマークスコアと実運用での信頼性の相関は、2026年前半の報告では <strong>r = 0.31</strong> にとどまる。スコアは選定の根拠として弱い。</p>
+</div>
+
+<h3>飽和の実態</h3>
+<p>飽和は平均値ではなく分散に現れる。上位10モデルのスコア標準偏差は、2年前の8.4ポイントから1.9ポイントへ縮小した。順位は入れ替わり続けているが、その入れ替わりはノイズと区別できない。</p>
+
+<h3>再現性の欠如</h3>
+<ul>
+  <li>プロンプトの空白や改行の差で数ポイント動く報告が複数ある</li>
+  <li>ツール環境のバージョン差が結果を左右し、環境が論文に記載されない</li>
+  <li>評価側LLMを使う場合、その判定バイアスが未検証のまま残る</li>
+</ul>
+
+<h2>手法の比較</h2>
+<p>四方式を、測れる能力・再現性・コストで並べた。コストは同一タスク100件あたりの相対値である。</p>
+
+<table>
+  <thead>
+    <tr><th>手法</th><th>測れる能力</th><th>再現性</th><th class="num">相対コスト</th><th>主な難点</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>静的ベンチマーク</td><td>単発推論</td><td>高</td><td class="num">1.0</td><td>飽和済み</td></tr>
+    <tr><td>サンドボックス実行</td><td>ツール利用・長期タスク</td><td>中</td><td class="num">14.2</td><td>環境構築が重い</td></tr>
+    <tr><td>LLM-as-a-judge</td><td>自由記述の品質</td><td>低</td><td class="num">3.6</td><td>判定バイアス</td></tr>
+    <tr><td>人手評価</td><td>総合</td><td>中</td><td class="num">98.0</td><td>スケールしない</td></tr>
+  </tbody>
+</table>
+
+<h3>軌跡ベース評価</h3>
+<p>最終回答ではなく、ツール呼び出しの順序と引数を含む実行軌跡を採点する。同じ正答に至っても、無駄な探索を9回繰り返した軌跡と2回で到達した軌跡を区別できる点が、単発評価との決定的な差である。</p>
+
+<pre><code>async def evaluate(agent, task, rubric):
+    trace = await agent.run(task, record_trace=True)
+    # ツール呼び出しの順序と引数まで含めて採点する
+    score = await judge(trace.steps, rubric=rubric)
+    return {"task": task.id, "score": score, "steps": len(trace.steps)}</code></pre>
+
+<div class="callout warn">
+  <p>軌跡採点は評価側LLMへの入力が長くなり、コストが単発比で3〜5倍に膨らむ。全件ではなく層化抽出での適用が現実的である。</p>
+</div>
+
+<h2>実務への含意</h2>
+<p>モデル選定にベンチマーク順位を使うのは、上位帯では意味を持たない。自社タスクの軌跡を50件程度記録し、失敗の型を分類したうえで比較する方が判断材料になる。<em>順位ではなく失敗の型</em>を見るべきである。</p>
+
+<h2>結論</h2>
+<p>評価の対象は「正解したか」から「どう到達したか」へ移りつつある。ただし軌跡採点も評価側LLMのバイアスを引き継ぐため、少数の人手評価を校正用に併走させる設計が現時点では妥当である。</p>
+
+<p class="source">出典: <a href="https://arxiv.org/abs/2601.05111">arXiv:2601.05111</a> ほか42本のサーベイ。相対コストは同一タスク100件を GPU 1枚構成で実行した実測値の比。相関係数は公開ベンチマークと運用インシデント率の対応から算出 (n=18)。</p>
+
+</body>
+</html>

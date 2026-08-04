@@ -7,18 +7,28 @@ import { esc } from './sanitize';
  * what the generator emitted — renders with identical, mobile-first typography.
  */
 const BASE_CSS = `
+/* Tokens are normative in DESIGN.md (Google design.md spec, lint-clean).
+   Keep the two in sync: change DESIGN.md first, re-lint, then mirror here. */
 :root {
   color-scheme: light dark;
   --bg: #ffffff;
   --bg-elev: #f6f7f9;
   --bg-sunken: #eceef1;
-  --fg: #1a1c1f;
-  --fg-muted: #4f5661;
-  --fg-faint: #626a75;
+  --fg: #15181d;
+  --fg-muted: #555f6e;
+  --fg-faint: #5e6773;
   --accent: #0b62d6;
-  --accent-soft: #e5effd;
-  --border: #dfe3e8;
+  --accent-soft: #e7f0fd;
+  --accent-ink: #08479b;
+  --border: #dde1e6;
+  --positive: #0f7b52;
+  --caution: #8a5a00;
+  --caution-bg: #fff8e6;
+  --critical: #b3261e;
+  --critical-bg: #fdecea;
   --radius: 12px;
+  --radius-md: 8px;
+  --radius-sm: 4px;
   --maxw: 46rem;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
   --sans: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
@@ -34,7 +44,13 @@ const BASE_CSS = `
     --fg-faint: #a2aab6;
     --accent: #6aa9ff;
     --accent-soft: #22344d;
+    --accent-ink: #b8d5ff;
     --border: #343a42;
+    --positive: #5cc9a0;
+    --caution: #e0b65c;
+    --caution-bg: #2f2a1c;
+    --critical: #f0918a;
+    --critical-bg: #33211f;
   }
 }
 * { box-sizing: border-box; }
@@ -168,7 +184,9 @@ a.card .m {
   align-items: center; margin: 1.4rem 0 .5rem;
 }
 .report h1:first-of-type { margin-top: .3rem; }
-.report h1 { font-size: 1.62rem; line-height: 1.35; font-weight: 700; letter-spacing: -.01em; }
+/* h1 must clearly dominate: at 1.62rem it sat only ~5px above h2 and the
+   document title read as just another section. */
+.report h1 { font-size: 1.95rem; line-height: 1.32; font-weight: 700; letter-spacing: -.015em; }
 .report h2 {
   font-size: 1.28rem; line-height: 1.4; margin-top: 2.4rem;
   padding-bottom: .3rem; border-bottom: 1px solid var(--border); font-weight: 680;
@@ -205,6 +223,108 @@ a.card .m {
   text-align: left; vertical-align: top;
 }
 .report th { background: var(--bg-elev); font-weight: 650; white-space: nowrap; }
+
+/* ---------- design-system components ----------
+   Vocabulary authored reports may use. Defined here, never by the report:
+   see DESIGN.md and the kiroku-report skill. */
+
+/* Category kicker above the h1. */
+.report .eyebrow {
+  font-size: .72rem; font-weight: 700; letter-spacing: .08em;
+  color: var(--fg-faint); text-transform: none;
+  margin: 0 0 .35rem;
+}
+
+/* One-sentence finding under the h1. Was 1.06rem, indistinguishable from body
+   text at 17px — the distinction rested on color alone. */
+.report .lede {
+  font-size: 1.18rem; color: var(--fg-muted); line-height: 1.7;
+  margin: .55rem 0 1.7rem;
+}
+
+/* Stat block. Numbers the reader will look for twice. */
+.report .figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 1.5rem 0 1.8rem;
+}
+.report .figure { background: var(--bg); padding: .85rem .9rem; }
+.report .figure-label {
+  font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+  color: var(--fg-faint); margin-bottom: .3rem;
+}
+.report .figure-value {
+  font-family: var(--mono);
+  font-size: 1.5rem; font-weight: 600; line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.report .figure-value .unit {
+  font-size: .8rem; font-weight: 400; color: var(--fg-faint); margin-left: .15em;
+}
+.report .figure-delta { font-size: .76rem; margin-top: .25rem; color: var(--fg-faint); }
+.report .figure-delta.up { color: var(--positive); }
+.report .figure-delta.down { color: var(--critical); }
+
+/* Emphasis block. At most one per section. */
+.report .callout {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: .9rem 1rem;
+  margin: 1.5rem 0;
+  background: var(--bg-elev);
+}
+.report .callout > :first-child { margin-top: 0; }
+.report .callout > :last-child { margin-bottom: 0; }
+.report .callout.warn {
+  background: var(--caution-bg);
+  border-color: color-mix(in srgb, var(--caution) 35%, transparent);
+  color: var(--caution);
+}
+.report .callout.critical {
+  background: var(--critical-bg);
+  border-color: color-mix(in srgb, var(--critical) 35%, transparent);
+  color: var(--critical);
+}
+
+/* Right-aligned numeric column, tabular so ledger columns line up. */
+.report th.num, .report td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Provenance line. A report without sources is an opinion. */
+.report .source {
+  font-size: .82rem; color: var(--fg-faint); line-height: 1.7;
+  border-top: 1px solid var(--border);
+  padding-top: .9rem; margin-top: 2.4rem;
+}
+
+/* Japanese has no true italic, so a slanted kana run looks like a rendering
+   fault. Render <em> as 傍点 instead and keep italic for Latin only.
+   The dots sit above the glyphs and overflow the line box, colliding with the
+   line above; the padding restores the rhythm without touching other lines. */
+.report em {
+  font-style: normal;
+  -webkit-text-emphasis: dot;
+  text-emphasis: dot;
+  -webkit-text-emphasis-position: over right;
+  text-emphasis-position: over right;
+  line-height: 2.15;
+}
+.report p:has(em) { line-height: 2.15; }
+.report em:lang(en) {
+  font-style: italic;
+  text-emphasis: none;
+  -webkit-text-emphasis: none;
+  line-height: inherit;
+}
 
 /* ---------- table of contents ---------- */
 details.toc {

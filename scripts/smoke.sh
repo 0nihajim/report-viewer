@@ -9,7 +9,7 @@ set -uo pipefail
 
 BASE="${BASE:-http://localhost:8788}"
 TOKEN="${TOKEN:-devtoken}"
-SAMPLE="$(dirname "$0")/../samples/sample-report.html"
+SAMPLE="$(dirname "$0")/../samples/fixture-hostile.html"
 
 pass=0
 fail=0
@@ -73,27 +73,32 @@ echo "  response: $RESP"
 check "ingest ok flag" "$(printf '%s' "$RESP" | grep -c '"ok": true')" "1"
 check_min "ingest id honored" "$(printf '%s' "$RESP" | grep -c 'smoke-test-report')" "1"
 check "title auto-extracted" \
-  "$(printf '%s' "$RESP" | grep -c 'AIエージェント評価手法の最新動向')" "1"
+  "$(printf '%s' "$RESP" | grep -c 'サニタイズ検証用フィクスチャ')" "1"
 
 echo "=== 4. rendered report ==="
 curl -s "$BASE/r/smoke-test-report" -o /tmp/rv_report.html
 check "GET /r/<id>" "$(code "$BASE/r/smoke-test-report")" "200"
 
 echo "  -- dangerous content must be stripped --"
-# NOTE: author CSS is deliberately NOT stripped any more -- reports are allowed
-# their own visual identity. Cosmetic declarations like hotpink / Comic Sans now
-# survive on purpose; what must not survive is anything executable or anything
-# that escapes the .report scope. See scripts/test-css.sh for that contract.
+# Author CSS is no longer passed through: the archive's value is that every
+# report reads the same way, so appearance belongs to the viewer alone. The
+# sanitizer's allowCss path still exists and is covered by test-css.sh, but the
+# default (and what ships) drops <style> entirely.
 for pat in "alert(" "onload=" "onclick=" "javascript:" "<script" "<iframe" \
-           "evil.example.com" "bgcolor" 'width="1400"' "document.cookie"; do
+           "evil.example.com" "hotpink" "Comic Sans" "bgcolor" 'width="1400"' "document.cookie"; do
   check "stripped: $pat" "$(countf /tmp/rv_report.html "$pat")" "0"
 done
 
-echo "  -- author CSS passes through, but scoped --"
-check "author CSS kept" "$(countf /tmp/rv_report.html 'hotpink')" "1"
-check "report style block injected" "$(countf /tmp/rv_report.html 'report-supplied, sanitized')" "1"
-check "no unscoped body rule from report" \
-  "$(grep -oE '(^|})[[:space:]]*body[[:space:]]*\{[^}]*hotpink' /tmp/rv_report.html | wc -l | tr -d ' ')" "0"
+echo "  -- report CSS must not reach the page --"
+check "no injected report style block" "$(countf /tmp/rv_report.html 'report-supplied')" "0"
+check "exactly one <style> (the shell's)" "$(countf /tmp/rv_report.html '<style>')" "1"
+
+echo "  -- subresources must not phone home --"
+# href and src need different rules: a link is inert until clicked, but an <img>
+# fetches on render, so an external src leaks that the report was opened from
+# inside an Access-protected session.
+check "external img src removed" "$(countf /tmp/rv_report.html 'pixel.gif')" "0"
+check "img element kept (alt survives)" "$(countf /tmp/rv_report.html '危険な画像')" "1"
 
 echo "  -- expected structure must survive --"
 check "table wrapped in .tw" "$(countf /tmp/rv_report.html '<div class="tw"><table')" "1"
@@ -117,7 +122,7 @@ check "cache-control private" "$(printf '%s' "$HDR" | grep -c -i 'no-store')" "1
 
 echo "=== 5. listing shows the report ==="
 curl -s "$BASE/" -o /tmp/rv_list.html
-check_min "list contains title" "$(countf /tmp/rv_list.html 'AIエージェント評価手法の最新動向')" "1"
+check_min "list contains title" "$(countf /tmp/rv_list.html 'サニタイズ検証用フィクスチャ')" "1"
 check_min "list contains tag" "$(countf /tmp/rv_list.html '>evaluation<')" "1"
 check "list has search box" "$(countf /tmp/rv_list.html 'id="q"')" "1"
 check "API lists report" "$(curl -s "$BASE/api/reports" | grep -c 'smoke-test-report')" "1"

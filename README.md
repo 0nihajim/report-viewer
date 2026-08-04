@@ -41,11 +41,27 @@ Safari (iPhone / Mac)  ← ホーム画面に追加して PWA 化
 
 ### 設計上のポイント
 
+**すべての見た目はビューアが持つ。レポートは構造だけを供給する。**
+アーカイブの価値は、30日間に書かれた30本が同じ本の30章として読めることにある。
+当初はレポートごとの `<style>` を通していたが、ページごとに世界観が変わって
+読み物としての一貫性が壊れたため方針を反転した。
+
+デザインシステムは 2 つの成果物で定義される。
+
+- **`DESIGN.md`** — Google の [design.md](https://github.com/google-labs-code/design.md)
+  仕様に沿ったトークン定義。`npx @google/design.md lint` で構造と WCAG コントラストを検証
+  （エラー0・警告0を維持）。`tokens.json`（W3C DTCG）と `theme.css`（Tailwind v4）も生成済み。
+- **`kiroku-report` スキル** — レポート生成側が読む執筆規約。使えるクラス、
+  禁止構造、日本語組版の注意点を定める。
+
 **レポート HTML は必ずサニタイズする。**
-生成物には `<script>` や独自 `<style>` が混ざりうるため、`HTMLRewriter` で
-script / style / iframe / `on*` ハンドラ / `javascript:` URL を除去し、
-`<body>` の中身だけを取り出して自前の読書シェルに埋め込みます。
-これにより「どのレポートも同じ綺麗な組版で読める」ことを担保しています。
+`HTMLRewriter` で script / style / iframe / `on*` / `javascript:` を除去し、
+`<body>` の中身だけを自前の読書シェルに埋め込みます。
+
+`href` と `src` は規則が異なります。リンクは押されるまで通信しませんが、
+`<img src>` は描画時に自動で読み込まれるため、**外部 URL はトラッキングピクセルとして
+「Access で保護されたセッションから開いた事実」を漏らします**。
+`src` は `data:image/*` と同一オリジンのみ許可します。
 
 **ワイドテーブルは横スクロールに閉じ込める。**
 生成された `<table width="1400">` はモバイルレイアウトを破壊するので、
@@ -132,11 +148,28 @@ curl -X POST http://localhost:8788/api/reports?tags=evaluation \
 ## 開発
 
 ```bash
-npm run dev                       # wrangler dev (localhost:8788)
-bash scripts/typecheck.sh         # tsc --noEmit
-bash scripts/smoke.sh             # E2E テスト（56 ケース）
-bash scripts/seed-demo.sh         # デモレポート投入
+npm run dev                          # wrangler dev (localhost:8788)
+bash scripts/typecheck.sh            # tsc --noEmit
+bash scripts/smoke.sh                # E2E (60 ケース)
+bash scripts/test-consistency.sh eval inference otel   # 全レポートのCSS一致 (39)
+bash scripts/test-escaping.sh        # 実体参照・CJK詰め (24)
+bash scripts/test-css.sh            # ?css=1 経路の隔離 (33)
+bash scripts/lint-report.sh samples/report-eval.html   # 執筆規約チェック
+bash scripts/seed-report.sh samples/report-eval.html eval 2026-08-04 "evaluation"
+npx -y @google/design.md lint DESIGN.md                # トークン + WCAG
 ```
+
+### レポートの書き方
+
+生成側は `kiroku-report` スキルに従います。要点のみ:
+
+- `<style>` `<script>` `style=` は書かない（サニタイザが除去する）
+- `<h1>` は1つ、見出しはレベルを飛ばさない
+- 数値列は `class="num"` で右寄せ、単位はヘッダセルに
+- 使えるクラスは `.eyebrow` `.lede` `.figures/.figure` `.callout` `.num` `.source`
+- 末尾に必ず `.source`（出典なきレポートは意見にすぎない）
+
+`scripts/lint-report.sh` が禁止構造と構造規約を機械的に検証します。
 
 ### GitHub Pages プレビューの生成
 

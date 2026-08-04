@@ -50,7 +50,13 @@ PY
 
 curl -s -X POST "$BASE/api/reports" -H "authorization: Bearer $TOKEN" \
   -H 'content-type: application/json' --data-binary @/tmp/rv_css.json > /dev/null
-curl -s "$BASE/r/css-test" -o /tmp/rv_css.html
+# `?css=1` is required: passing report CSS through is off by default now, because
+# per-report palettes broke the archive's consistency. This suite covers the
+# escape hatch -- that when CSS *is* allowed, it still cannot escape or overlay.
+curl -s "$BASE/r/css-test?css=1" -o /tmp/rv_css.html
+
+# Default path must drop it entirely.
+curl -s "$BASE/r/css-test" -o /tmp/rv_css_default.html
 # Isolate the report-supplied block so counts can't collide with the viewer's
 # own BASE_CSS (which legitimately contains `position: sticky`, `.top {`, etc).
 python3 - <<'PY'
@@ -61,6 +67,14 @@ open('/tmp/rv_css_block.txt', 'w', encoding='utf-8').write(m.group(0) if m else 
 PY
 cnt() { grep -o -F -- "$1" /tmp/rv_css_block.txt | wc -l | tr -d ' '; }
 cnt_all() { grep -o -F -- "$1" /tmp/rv_css.html | wc -l | tr -d ' '; }
+
+echo "=== default path drops report CSS entirely ==="
+check "default: no report style block" \
+  "$(grep -o -F 'report-supplied' /tmp/rv_css_default.html | wc -l | tr -d ' ')" "0"
+check "default: hotpink-style CSS gone" \
+  "$(grep -o -F '#c2185b' /tmp/rv_css_default.html | wc -l | tr -d ' ')" "0"
+check "default: exactly one <style>" \
+  "$(grep -o -F '<style>' /tmp/rv_css_default.html | wc -l | tr -d ' ')" "1"
 
 echo "=== author CSS survives ==="
 # `:root` and `body` both scope to `.report`, producing two separate rules, so

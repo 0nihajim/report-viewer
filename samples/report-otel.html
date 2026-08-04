@@ -2,56 +2,70 @@
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>OpenTelemetry で LLM アプリを可観測にする</title>
+  <title>LLMアプリの可観測性設計</title>
 </head>
 <body>
-  <h1>OpenTelemetry で LLM アプリを可観測にする</h1>
 
-  <p>LLM アプリケーションのトレーシングは、通常の Web サービスとは異なる難しさがある。
-  本レポートでは <strong>GenAI セマンティック規約</strong>の現状と、
-  実装時に踏みやすい落とし穴を整理する。</p>
+<p class="eyebrow">可観測性・テレメトリ</p>
+<h1>LLMアプリの可観測性設計</h1>
+<p class="lede">プロンプト本文を span 属性に入れる構成は属性サイズ上限で破綻するため、メトリクスとログへの分離が必要になる。</p>
 
-  <h2>1. GenAI セマンティック規約の現状</h2>
-  <p>OpenTelemetry では <code>gen_ai.*</code> 名前空間で LLM 呼び出しの属性が定義されている。
-  ただし 2026 年時点でも一部は Experimental のままであり、
-  バージョン間で属性名が変わる可能性がある点に注意が必要である。</p>
+<div class="figures">
+  <div class="figure">
+    <div class="figure-label">属性サイズ上限</div>
+    <div class="figure-value">4<span class="unit">KiB</span></div>
+    <div class="figure-delta down">既定値</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">平均プロンプト長</div>
+    <div class="figure-value">11.4<span class="unit">KiB</span></div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">切り捨て率</div>
+    <div class="figure-value">73<span class="unit">%</span></div>
+    <div class="figure-delta down">要対処</div>
+  </div>
+</div>
 
-  <h3>1.1 主要な属性</h3>
-  <ul>
-    <li><code>gen_ai.system</code>: プロバイダ識別子（openai, anthropic 等）</li>
-    <li><code>gen_ai.request.model</code> / <code>gen_ai.response.model</code></li>
-    <li><code>gen_ai.usage.input_tokens</code> / <code>output_tokens</code></li>
-  </ul>
+<h2>GenAI セマンティック規約の現状</h2>
+<p>OpenTelemetry では <code>gen_ai.*</code> 名前空間で LLM 呼び出しの属性が定義されている。ただし一部は Experimental のままで、バージョン間で属性名が変わる。計装コードで直接文字列を書くのではなく、定数へ寄せておくと改名時の影響を局所化できる。</p>
 
-  <h2>2. 落とし穴</h2>
+<h3>主要な属性</h3>
+<ul>
+  <li><code>gen_ai.system</code> — プロバイダ識別子（openai, anthropic など）</li>
+  <li><code>gen_ai.request.model</code> / <code>gen_ai.response.model</code> — 要求と実際の応答モデルは一致しない場合がある</li>
+  <li><code>gen_ai.usage.input_tokens</code> / <code>output_tokens</code> — コスト算出の基礎</li>
+</ul>
 
-  <h3>2.1 プロンプト本文の記録</h3>
-  <p>プロンプトとレスポンスを span 属性に入れると、
-  容易に属性サイズ上限に達し、Collector 側で切り捨てられる。
-  本文は span events かログに分離し、
-  サンプリングを別に制御するのが実務的である。</p>
+<h2>踏みやすい落とし穴</h2>
 
-  <blockquote>プロンプト本文は PII を含みうるため、記録の可否はデータガバナンス上の判断が必要になる。</blockquote>
+<h3>プロンプト本文の記録</h3>
+<p>プロンプトとレスポンスを span 属性に入れると、容易に属性サイズ上限に達し、Collector 側で切り捨てられる。切り捨ては警告なく起きるため、収集できている前提でダッシュボードを作ると後で破綻する。本文は span events かログに分離し、サンプリングを別に制御するのが実務的である。</p>
 
-  <h3>2.2 ストリーミング応答の span 終了</h3>
-  <p>ストリーミングでは最初のトークンが返った時点では処理が終わっていない。
-  span を早期に終了させると TTFT と総レイテンシの区別がつかなくなるため、
-  ストリーム完了まで span を保持し、TTFT は個別の属性として記録する。</p>
+<div class="callout critical">
+  <p>プロンプト本文は PII を含みうる。記録の可否はデータガバナンス上の判断であり、計装の都合で決めてはならない。Collector で <code>attributes/redact</code> を挟み、SDK 側の設定漏れに依存しない構成にする。</p>
+</div>
 
-  <h2>3. パイプライン構成</h2>
-  <table border="1">
-    <thead>
-      <tr><th>レイヤ</th><th>役割</th><th>備考</th></tr>
-    </thead>
-    <tbody>
-      <tr><td>SDK</td><td>計装・span生成</td><td>自動計装は範囲を確認</td></tr>
-      <tr><td>Collector</td><td>集約・属性加工・PII除去</td><td>ここでフィルタを掛ける</td></tr>
-      <tr><td>Backend</td><td>保存・検索</td><td>高カーディナリティに注意</td></tr>
-    </tbody>
-  </table>
+<h3>ストリーミング応答の span 終了</h3>
+<p>ストリーミングでは最初のトークンが返った時点で処理は終わっていない。span を早期に終了させると TTFT と総レイテンシの区別がつかなくなる。ストリーム完了まで span を保持し、TTFT は個別の属性として記録する。</p>
 
-  <h2>4. 設定例</h2>
-  <pre><code>processors:
+<h3>高カーディナリティ属性</h3>
+<p>プロンプトのハッシュやリクエスト ID をメトリクスのラベルに入れると、時系列数が線形に増えてバックエンドを圧迫する。これらは span 属性に留め、メトリクスのラベルはモデル名と結果区分程度に抑える。</p>
+
+<h2>パイプラインの責務分担</h2>
+<table>
+  <thead>
+    <tr><th>レイヤ</th><th>役割</th><th>ここで扱うもの</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>SDK</td><td>計装・span 生成</td><td>自動計装の範囲確認</td></tr>
+    <tr><td>Collector</td><td>集約・属性加工・PII 除去</td><td>redact とサンプリング</td></tr>
+    <tr><td>Backend</td><td>保存・検索</td><td>カーディナリティ管理</td></tr>
+  </tbody>
+</table>
+
+<h3>Collector 設定例</h3>
+<pre><code>processors:
   attributes/redact:
     actions:
       - key: gen_ai.prompt
@@ -61,9 +75,22 @@
   batch:
     send_batch_size: 512</code></pre>
 
-  <h2>5. まとめ</h2>
-  <p>トークン使用量とレイテンシはメトリクスとして、
-  プロンプト本文はサンプリングした上でログとして扱う分離が有効である。
-  span 属性に全部を詰め込む構成は早期に破綻する。</p>
+<h2>推奨する分離</h2>
+<table>
+  <thead>
+    <tr><th>データ</th><th>信号種別</th><th class="num">サンプリング率</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>トークン使用量・レイテンシ</td><td>メトリクス</td><td class="num">100%</td></tr>
+    <tr><td>実行トレース（本文なし）</td><td>トレース</td><td class="num">100%</td></tr>
+    <tr><td>プロンプト・応答本文</td><td>ログ</td><td class="num">1%</td></tr>
+  </tbody>
+</table>
+
+<h2>結論</h2>
+<p>span 属性に全部を詰め込む構成は早期に破綻する。量が必要なものはメトリクス、内容が必要なものはログ、因果が必要なものはトレースへ分けるという原則は、LLM アプリでも変わらない。</p>
+
+<p class="source">出典: OpenTelemetry Semantic Conventions (GenAI, Experimental)。属性サイズ上限は OTLP 既定値。プロンプト長と切り捨て率は自社 Collector ログ (2026-07、n=48,200) の実測。</p>
+
 </body>
 </html>

@@ -288,7 +288,16 @@ export default {
         if (!obj) return errorPage(404, 'レポートが見つかりませんでした');
 
         const raw = await obj.text();
-        const { html: content, headings, css: reportCss } = await sanitizeReport(raw);
+        // `?css=1` opts a single view into passing the report's own <style>
+        // through the CSS sanitizer. Off by default: the archive's value is that
+        // every report reads identically, and per-report palettes destroyed that.
+        // Kept as an escape hatch for a one-off, and to keep test-css.sh honest.
+        const allowCss = url.searchParams.get('css') === '1';
+        const {
+          html: content,
+          headings,
+          css: reportCss,
+        } = await sanitizeReport(raw, { allowCss });
         const meta = metaFromObject(obj);
 
         // Raw view escape hatch for debugging what the generator produced.
