@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>AIエージェント評価手法の最新動向</title>
+  <!-- Deliberately nasty input: the viewer must strip all of this. -->
+  <style>body { background: hotpink !important; font-family: Comic Sans MS; }</style>
+  <script>alert('xss-1'); document.cookie = 'stolen';</script>
+  <link rel="stylesheet" href="https://evil.example.com/pwn.css">
+</head>
+<body onload="alert('xss-2')">
+  <h1>AIエージェント評価手法の最新動向</h1>
+
+  <p>本レポートでは、2026年前半に発表された<strong>AIエージェント評価</strong>に関する主要な研究を整理する。
+  従来のベンチマークが抱える<em>飽和</em>の問題と、それに対する新しいアプローチを比較した。</p>
+
+  <blockquote>静的ベンチマークのスコアは、実運用における信頼性を予測しない。</blockquote>
+
+  <h2>1. 背景と課題</h2>
+  <p>既存の評価手法は単発タスクの正答率に依存しており、
+  長期的なタスク遂行やツール利用の巧拙を捉えられない。
+  <a href="https://arxiv.org/abs/2601.05111">関連論文</a>も同様の指摘をしている。</p>
+
+  <h3>1.1 ベンチマーク飽和</h3>
+  <p>主要ベンチマークは既に90%超のスコアに到達しており、モデル間の差異を識別できない。</p>
+
+  <h3>1.2 再現性の欠如</h3>
+  <ul>
+    <li>プロンプトの些細な差異でスコアが大きく変動する</li>
+    <li>ツール環境のバージョン差が結果を左右する</li>
+    <li>評価用LLM（LLM-as-a-judge）自体のバイアス</li>
+  </ul>
+
+  <h2>2. 手法の比較</h2>
+  <table border="1" cellpadding="8" bgcolor="#ffcccc" width="1400">
+    <thead>
+      <tr><th>手法</th><th>対象能力</th><th>再現性</th><th>コスト</th><th>備考</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>静的ベンチマーク</td><td>単発推論</td><td>高</td><td>低</td><td>飽和が進行</td></tr>
+      <tr><td>サンドボックス実行</td><td>ツール利用・長期タスク</td><td>中</td><td>高</td><td>環境構築が重い</td></tr>
+      <tr><td>LLM-as-a-judge</td><td>自由記述の品質</td><td>低</td><td>中</td><td>判定バイアスに注意</td></tr>
+      <tr><td>人手評価</td><td>総合</td><td>中</td><td>非常に高</td><td>スケールしない</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. 実装例</h2>
+  <p>エージェントの軌跡（trajectory）を記録し、後から採点する方式のスケッチ:</p>
+  <pre><code>async def evaluate(agent, task, rubric):
+    trace = await agent.run(task, record_trace=True)
+    # ツール呼び出しの順序と引数まで含めて採点する
+    score = await judge(trace.steps, rubric=rubric)
+    return {"task": task.id, "score": score, "steps": len(trace.steps)}</code></pre>
+
+  <p>採点関数は <code>rubric</code> を明示的に受け取り、判定根拠を保存することが重要である。</p>
+
+  <h2>4. 結論</h2>
+  <p>単一指標での評価から、<strong>軌跡ベースの多面的評価</strong>への移行が進んでいる。
+  今後はコストと再現性のバランスを取ったハイブリッド構成が主流になると考えられる。</p>
+
+  <p>詳細は <a href="javascript:alert('xss-3')">この危険なリンク</a> および
+  <a href="#section-none" onclick="alert('xss-4')">内部リンク</a> を参照（いずれも無害化されるべき）。</p>
+
+  <iframe src="https://evil.example.com/frame"></iframe>
+  <img src="javascript:alert('xss-5')" alt="危険な画像">
+</body>
+</html>

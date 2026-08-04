@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>OpenTelemetry で LLM アプリを可観測にする</title>
+</head>
+<body>
+  <h1>OpenTelemetry で LLM アプリを可観測にする</h1>
+
+  <p>LLM アプリケーションのトレーシングは、通常の Web サービスとは異なる難しさがある。
+  本レポートでは <strong>GenAI セマンティック規約</strong>の現状と、
+  実装時に踏みやすい落とし穴を整理する。</p>
+
+  <h2>1. GenAI セマンティック規約の現状</h2>
+  <p>OpenTelemetry では <code>gen_ai.*</code> 名前空間で LLM 呼び出しの属性が定義されている。
+  ただし 2026 年時点でも一部は Experimental のままであり、
+  バージョン間で属性名が変わる可能性がある点に注意が必要である。</p>
+
+  <h3>1.1 主要な属性</h3>
+  <ul>
+    <li><code>gen_ai.system</code>: プロバイダ識別子（openai, anthropic 等）</li>
+    <li><code>gen_ai.request.model</code> / <code>gen_ai.response.model</code></li>
+    <li><code>gen_ai.usage.input_tokens</code> / <code>output_tokens</code></li>
+  </ul>
+
+  <h2>2. 落とし穴</h2>
+
+  <h3>2.1 プロンプト本文の記録</h3>
+  <p>プロンプトとレスポンスを span 属性に入れると、
+  容易に属性サイズ上限に達し、Collector 側で切り捨てられる。
+  本文は span events かログに分離し、
+  サンプリングを別に制御するのが実務的である。</p>
+
+  <blockquote>プロンプト本文は PII を含みうるため、記録の可否はデータガバナンス上の判断が必要になる。</blockquote>
+
+  <h3>2.2 ストリーミング応答の span 終了</h3>
+  <p>ストリーミングでは最初のトークンが返った時点では処理が終わっていない。
+  span を早期に終了させると TTFT と総レイテンシの区別がつかなくなるため、
+  ストリーム完了まで span を保持し、TTFT は個別の属性として記録する。</p>
+
+  <h2>3. パイプライン構成</h2>
+  <table border="1">
+    <thead>
+      <tr><th>レイヤ</th><th>役割</th><th>備考</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>SDK</td><td>計装・span生成</td><td>自動計装は範囲を確認</td></tr>
+      <tr><td>Collector</td><td>集約・属性加工・PII除去</td><td>ここでフィルタを掛ける</td></tr>
+      <tr><td>Backend</td><td>保存・検索</td><td>高カーディナリティに注意</td></tr>
+    </tbody>
+  </table>
+
+  <h2>4. 設定例</h2>
+  <pre><code>processors:
+  attributes/redact:
+    actions:
+      - key: gen_ai.prompt
+        action: delete
+      - key: gen_ai.completion
+        action: delete
+  batch:
+    send_batch_size: 512</code></pre>
+
+  <h2>5. まとめ</h2>
+  <p>トークン使用量とレイテンシはメトリクスとして、
+  プロンプト本文はサンプリングした上でログとして扱う分離が有効である。
+  span 属性に全部を詰め込む構成は早期に破綻する。</p>
+</body>
+</html>

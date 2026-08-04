@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>LLMサービングの推論最適化: vLLMとSGLangの比較</title>
+</head>
+<body>
+  <h1>LLMサービングの推論最適化: vLLMとSGLangの比較</h1>
+
+  <p>本レポートは、実運用における LLM 推論サーバの選定を目的として、
+  <strong>vLLM</strong> と <strong>SGLang</strong> のスループット特性を整理したものである。</p>
+
+  <h2>1. 前提</h2>
+  <p>計測は単一ノード A100 80GB×1、モデルは 14B 級の dense モデルを想定した。
+  入力長は 1,024 トークン、出力長は 256 トークンで固定している。</p>
+
+  <h3>1.1 評価軸</h3>
+  <ul>
+    <li>スループット（tokens/sec）: バッチ処理時の総処理量</li>
+    <li>TTFT（Time To First Token）: 対話用途での体感速度</li>
+    <li>メモリ効率: KVキャッシュの利用効率</li>
+  </ul>
+
+  <h2>2. アーキテクチャの違い</h2>
+  <p>vLLM は <code>PagedAttention</code> により KV キャッシュを固定サイズのブロックに分割し、
+  断片化を抑制する。一方 SGLang は <code>RadixAttention</code> によって
+  プレフィックスを共有するリクエスト間で KV キャッシュを再利用する。</p>
+
+  <blockquote>プレフィックスの共有率が高いワークロードでは、RadixAttention の効果が支配的になる。</blockquote>
+
+  <h3>2.1 使い分けの指針</h3>
+  <table border="1">
+    <thead>
+      <tr><th>ワークロード</th><th>推奨</th><th>理由</th></tr>
+    </thead>
+    <tbody>
+      <tr><td>バッチ推論（多様な入力）</td><td>vLLM</td><td>連続バッチングが安定</td></tr>
+      <tr><td>Few-shotプロンプト固定</td><td>SGLang</td><td>プレフィックス再利用が効く</td></tr>
+      <tr><td>エージェント（長い共通履歴）</td><td>SGLang</td><td>会話履歴の再計算を回避</td></tr>
+      <tr><td>構造化出力が必須</td><td>SGLang</td><td>文法制約デコードが高速</td></tr>
+    </tbody>
+  </table>
+
+  <h2>3. 起動例</h2>
+  <pre><code>python -m vllm.entrypoints.openai.api_server \
+  --model Qwen/Qwen2.5-14B-Instruct \
+  --max-model-len 8192 \
+  --gpu-memory-utilization 0.92 \
+  --enable-prefix-caching</code></pre>
+
+  <h2>4. 結論</h2>
+  <p>プレフィックス共有が見込めるエージェント用途では SGLang、
+  入力が多様なバッチ用途では vLLM が有利という結果になった。
+  なお両者とも prefix caching を有効化するだけで大きく改善する場合があるため、
+  まずはその設定を確認すべきである。</p>
+</body>
+</html>

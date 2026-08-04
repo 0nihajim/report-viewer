@@ -1,0 +1,28 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "report-viewer",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "r2_buckets": [
+    {
+      "binding": "REPORTS",
+      "bucket_name": "reports",
+      "preview_bucket_name": "reports-preview"
+    }
+  ],
+  "vars": {
+    "SITE_TITLE": "Research Reports"
+  }
+  // Secrets (set with `npx wrangler secret put <NAME>`):
+  //   INGEST_TOKEN  - bearer token used by the report generator to PUT/POST reports
+  //
+  // Custom domain: add a route in the Cloudflare dashboard, or uncomment below
+  //   and replace with your own zone.
+  // "routes": [
+  //   { "pattern": "reports.example.com", "custom_domain": true }
+  // ]
+}

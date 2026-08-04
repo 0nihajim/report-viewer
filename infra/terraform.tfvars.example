@@ -1,0 +1,21 @@
+# Cloudflare account that owns the Worker, R2 bucket and Access app.
+# Dashboard -> Workers & Pages -> right sidebar.
+account_id = "0123456789abcdef0123456789abcdef"
+
+# Apex domain already onboarded to Cloudflare.
+zone_name = "example.com"
+
+# Hostname the viewer is served on.
+hostname = "reports.example.com"
+
+# Only these addresses can read the reports (Cloudflare Access, email OTP).
+allowed_emails = ["you@example.com"]
+
+# Optional: allow a whole domain instead of listing individuals.
+# allowed_email_domains = ["mycompany.com"]
+
+# Header title and PWA name.
+site_title = "Research Reports"
+
+# 7 days keeps re-auth on iPhone infrequent.
+session_duration = "168h"
