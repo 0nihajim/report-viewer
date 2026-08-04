@@ -245,6 +245,8 @@ function layout(opts: {
   siteTitle: string;
   body: string;
   showHome: boolean;
+  /** Sanitized, .report-scoped CSS supplied by the report itself. */
+  reportCss?: string;
 }): string {
   return `<!doctype html>
 <html lang="ja">
@@ -260,6 +262,7 @@ function layout(opts: {
 <link rel="apple-touch-icon" href="/icon.png">
 <title>${esc(opts.title)}</title>
 <style>${BASE_CSS}</style>
+${opts.reportCss ? `<style>/* report-supplied, sanitized + scoped to .report */\n${opts.reportCss}</style>` : ''}
 </head>
 <body>
 <div class="wrap">
@@ -357,6 +360,7 @@ export function renderReport(
   contentHtml: string,
   headings: Heading[],
   siteTitle: string,
+  reportCss = '',
 ): string {
   // Only bother with a TOC when there is real structure to navigate.
   const tocItems = headings.filter((h) => h.level >= 2);
@@ -385,7 +389,7 @@ ${tocItems
 ${heading}${contentHtml}
   </article>`;
 
-  return layout({ title: meta.title, siteTitle, body, showHome: true });
+  return layout({ title: meta.title, siteTitle, body, showHome: true, reportCss });
 }
 
 export function renderManifest(siteTitle: string): string {

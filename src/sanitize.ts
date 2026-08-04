@@ -2,19 +2,23 @@
  * HTML sanitizer + normalizer built on HTMLRewriter (native to Workers).
  *
  * Goals:
- *  1. Strip anything executable or layout-hijacking from generated reports
- *     (<script>, <style>, <link>, inline event handlers, javascript: URLs).
+ *  1. Strip anything executable from generated reports (<script>, inline event
+ *     handlers, javascript: URLs, <iframe>/<object>).
  *  2. Extract only the <body> content so we can wrap it in our own mobile
- *     reading shell, giving us full control over typography.
+ *     reading shell.
  *  3. Collect headings (h1-h3) to build a table of contents.
+ *  4. Keep author CSS, but sanitized and scoped: reports are allowed their own
+ *     visual identity, while the viewer chrome stays untouchable. See css.ts.
  *
- * We deliberately drop author <style> blocks: report generators produce wildly
- * inconsistent CSS, and the whole point of the viewer is a single, consistent,
- * mobile-first reading experience.
+ * JS is never passed through. CSS is, because a stylesheet cannot read the
+ * Access session cookie -- but it *can* cover the UI or phone home, so it goes
+ * through sanitizeCss() first.
  */
 
+import { sanitizeCss } from './css';
+
 /** Elements removed entirely, including their contents. */
-const DROP_WITH_CONTENT = ['script', 'style', 'noscript', 'template', 'iframe', 'object', 'embed', 'applet'];
+const DROP_WITH_CONTENT = ['script', 'noscript', 'template', 'iframe', 'object', 'embed', 'applet'];
 
 /** Elements removed but whose children are kept (unwrapped). */
 const UNWRAP = ['html', 'body', 'head', 'meta', 'link', 'base', 'font', 'center'];
@@ -49,6 +53,11 @@ export interface SanitizeResult {
   headings: Heading[];
   /** Title discovered from <title> or the first <h1>, if any. */
   title: string | null;
+  /**
+   * Author CSS, sanitized and scoped to the report container. Empty when the
+   * report shipped no <style> or nothing survived sanitizing.
+   */
+  css: string;
 }
 
 /** Turn heading text into a URL-safe, unique anchor id. */
@@ -84,8 +93,25 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
   let currentHeading: { level: number; id: string; text: string } | null = null;
   // >0 while inside <pre>/<code>, where whitespace must be preserved verbatim.
   let preDepth = 0;
+  // Last non-whitespace character emitted in the previous text chunk. Needed
+  // because HTMLRewriter splits text at tag boundaries: "。\n  <a>関連論文</a>"
+  // arrives as separate chunks, so a per-chunk regex cannot see that the
+  // leading whitespace of the second chunk follows a closing punctuation mark.
+  let prevChar = '';
+  // Author <style> contents, concatenated for one sanitize pass at the end.
+  const cssBuf: string[] = [];
 
   const rewriter = new HTMLRewriter()
+    .on('style', {
+      // Author CSS is collected (not emitted inline) so it can be sanitized and
+      // scoped once, then injected into <head> by the renderer.
+      text(t) {
+        cssBuf.push(t.text);
+      },
+      element(el) {
+        el.remove();
+      },
+    })
     .on('title', {
       element() {
         inTitle = true;
@@ -189,18 +215,27 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
         // Source line breaks become spaces in HTML, which looks wrong between
         // Japanese characters. Tighten them everywhere except inside code.
         if (preDepth === 0) {
-          const tightened = tightenCjk(t.text);
-          if (tightened !== t.text) {
+          let out = tightenCjk(t.text);
+          // Cross-chunk case: HTMLRewriter splits text at tag boundaries, so
+          // "。\n  <a>関連論文</a>" arrives as two chunks and the intra-chunk
+          // regex cannot see the punctuation. Strip this chunk's leading
+          // whitespace when the previous chunk ended in closing punctuation.
+          if (prevChar && isCloser(prevChar)) {
+            out = out.replace(/^[ \t\r\n\f\v]+/, '');
+          }
+          if (out !== t.text) {
             // t.text is NOT entity-decoded — it arrives as the raw source text
             // (verified: a chunk reads "a &lt; b"). replace() without
             // `html: true` re-escapes the ampersands, yielding "&amp;lt;" which
             // renders as the literal string "&lt;". So we must insert as HTML.
             //
-            // This is safe because tightenCjk only *removes* spaces between two
-            // CJK codepoints; it never introduces '<', '>' or '&', so the chunk
-            // stays exactly as already-sanitized as it arrived.
-            t.replace(tightened, { html: true });
+            // This is safe because tightenCjk only *removes* whitespace; it
+            // never introduces '<', '>' or '&', so the chunk stays exactly as
+            // already-sanitized as it arrived.
+            t.replace(out, { html: true });
           }
+          const trimmed = out.replace(/[ \t\r\n\f\v]+$/, '');
+          if (trimmed) prevChar = trimmed.slice(-1);
         }
       },
     });
@@ -230,7 +265,11 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
     cursor = at + replacement.length;
   }
 
-  return { html, headings, title: docTitle };
+  // Scope author CSS to the article container so a report can restyle itself
+  // without reaching the viewer chrome.
+  const css = cssBuf.length ? sanitizeCss(cssBuf.join('\n'), '.report') : '';
+
+  return { html, headings, title: docTitle, css };
 }
 
 /** Escape a string for safe interpolation into HTML text/attribute context. */
@@ -257,9 +296,32 @@ const CJK =
 // Whitespace here must include newlines and tabs: generators hard-wrap prose in
 // the source, and the browser collapses "。\n  本レポート" into "。 本レポート".
 // Matching only literal spaces left those gaps on screen.
-const CJK_GAP = new RegExp(`([${CJK}])[ \\t\\r\\n\\f\\v]+(?=[${CJK}])`, 'g');
+const WS = ' \\t\\r\\n\\f\\v';
+const CJK_GAP = new RegExp(`([${CJK}])[${WS}]+(?=[${CJK}])`, 'g');
+
+// Japanese closing punctuation already carries its own trailing white space in
+// the glyph, so a following space is always wrong -- even before Latin text
+// ("終わっていない。 span を" showed a visible hole). Handle these separately
+// from the CJK-on-both-sides rule.
+const CLOSERS = '\\u3001\\u3002\\uff01\\uff09\\uff1a\\uff1b\\uff1f\\u300d\\u300f\\u3011\\u3015\\u2019\\u201d';
+const CLOSER_GAP = new RegExp(`([${CLOSERS}])[${WS}]+(?=\\S)`, 'g');
+const CLOSER_ONE = new RegExp(`^[${CLOSERS}]$`);
+
+/** True when a single character is Japanese closing punctuation. */
+export function isCloser(ch: string): boolean {
+  return CLOSER_ONE.test(ch);
+}
+
+// Mirror image: opening brackets should not be preceded by a space.
+const OPENERS = '\\uff08\\u300c\\u300e\\u3010\\u3014\\u2018\\u201c';
+const OPENER_GAP = new RegExp(`(\\S)[${WS}]+(?=[${OPENERS}])`, 'g');
 
 export function tightenCjk(text: string): string {
-  // Two passes: a single pass misses runs like "。 、 あ" where matches overlap.
-  return text.replace(CJK_GAP, '$1').replace(CJK_GAP, '$1');
+  // Two passes on CJK_GAP: a single pass misses runs like "。 、 あ" where
+  // consecutive matches overlap on the shared lookahead character.
+  return text
+    .replace(CJK_GAP, '$1')
+    .replace(CJK_GAP, '$1')
+    .replace(CLOSER_GAP, '$1')
+    .replace(OPENER_GAP, '$1');
 }

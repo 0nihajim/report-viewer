@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>日本のバックオフィス業務の分類</title>
+<style>
+/* ============================================================
+   Design direction: 台帳と稟議 (ledger & ringi)
+
+   The subject is Japanese back-office work, so the visual language
+   comes from its own artifacts: ruled ledger paper, red inkan
+   impressions, indigo ruling lines, and the vertical stack of
+   approval seals on a 稟議書. Not a generic "corporate report".
+
+   Palette (5):
+     --washi   #f7f4ec  paper stock, slightly warm
+     --sumi    #1c1a17  ink, for body text
+     --indigo  #2b3a67  ruling lines and structure
+     --shu     #c4362f  inkan vermilion, used ONLY for seals/accents
+     --usuzumi #8a857c  light ink, for secondary text
+
+   Type: Yu Mincho for display (a ledger is a written document, and
+   mincho carries that formality) against Yu Gothic for body copy at
+   reading sizes, where mincho gets tiring on screen. Numerals in
+   tabular figures so the ledger columns actually line up.
+
+   Signature element: the .seal block -- a stamped approval column
+   that encodes the real routing order of a Japanese approval flow.
+   ============================================================ */
+
+:root {
+  --washi: #f7f4ec;
+  --sumi: #1c1a17;
+  --indigo: #2b3a67;
+  --shu: #c4362f;
+  --usuzumi: #8a857c;
+  --rule: rgba(43, 58, 103, .18);
+}
+
+body {
+  background: var(--washi);
+  color: var(--sumi);
+  font-family: "Yu Gothic", YuGothic, "Hiragino Sans", sans-serif;
+  font-feature-settings: "palt" 1;
+  line-height: 1.9;
+}
+
+/* ---- masthead: a ledger header, ruled top and bottom ---- */
+.masthead {
+  border-top: 3px solid var(--indigo);
+  border-bottom: 1px solid var(--rule);
+  padding: 1.4rem 0 1rem;
+  margin-bottom: 2rem;
+}
+.masthead .kicker {
+  font-size: .74rem;
+  letter-spacing: .22em;
+  color: var(--indigo);
+  font-weight: 700;
+  margin: 0 0 .5rem;
+}
+h1 {
+  font-family: "Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif;
+  font-size: clamp(1.7rem, 5.2vw, 2.6rem);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: .01em;
+  margin: 0 0 .6rem;
+}
+.masthead .lede {
+  color: var(--usuzumi);
+  font-size: .95rem;
+  margin: 0;
+}
+
+/* ---- section numbering: 第一類 / 第二類, not 01 / 02 ----
+   The content genuinely is a classification, so the numbering
+   device is a 類 (category) label rather than a sequence. */
+h2 {
+  font-family: "Yu Mincho", YuMincho, "Hiragino Mincho ProN", serif;
+  font-size: 1.32rem;
+  font-weight: 600;
+  margin: 3rem 0 1rem;
+  padding-bottom: .45rem;
+  border-bottom: 1px solid var(--rule);
+  display: flex;
+  align-items: baseline;
+  gap: .7rem;
+}
+h2 .cat {
+  flex: none;
+  font-size: .68rem;
+  letter-spacing: .12em;
+  color: var(--shu);
+  border: 1px solid var(--shu);
+  border-radius: 2px;
+  padding: .18rem .42rem;
+  font-family: "Yu Gothic", YuGothic, sans-serif;
+  font-weight: 700;
+  line-height: 1;
+}
+h3 {
+  font-size: 1.02rem;
+  font-weight: 700;
+  color: var(--indigo);
+  margin: 1.9rem 0 .5rem;
+}
+
+p { margin: 0 0 1.1rem; }
+
+/* ---- ledger table: ruled rows, tabular numerals ---- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: .9rem;
+  font-variant-numeric: tabular-nums;
+  margin: 1.2rem 0 1.6rem;
+}
+thead th {
+  text-align: left;
+  font-size: .74rem;
+  letter-spacing: .1em;
+  color: var(--indigo);
+  background: transparent;
+  border-bottom: 2px solid var(--indigo);
+  padding: .5rem .6rem;
+  white-space: nowrap;
+}
+tbody td {
+  border-bottom: 1px solid var(--rule);
+  padding: .62rem .6rem;
+  vertical-align: top;
+}
+tbody tr:nth-child(even) { background: rgba(43, 58, 103, .035); }
+td.num { text-align: right; white-space: nowrap; }
+
+/* ---- SIGNATURE: the approval seal column ----
+   A real ringi routes bottom-up: 起案 -> 係長 -> 課長 -> 部長.
+   The stack encodes that order, and each box is sized like an
+   actual 押印欄 (about 18mm square). */
+.ringi {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(74px, 1fr));
+  gap: .55rem;
+  margin: 1.5rem 0 2rem;
+  padding: 1rem;
+  border: 1px solid var(--rule);
+  background: #fffdf8;
+}
+.seal {
+  aspect-ratio: 1;
+  border: 1.5px solid var(--shu);
+  border-radius: 3px;
+  display: grid;
+  place-content: center;
+  text-align: center;
+  gap: .15rem;
+  position: relative;
+}
+.seal .role {
+  font-size: .62rem;
+  letter-spacing: .08em;
+  color: var(--usuzumi);
+}
+.seal .mark {
+  font-family: "Yu Mincho", YuMincho, serif;
+  font-size: 1.12rem;
+  color: var(--shu);
+  line-height: 1;
+  /* A struck seal is never perfectly straight. */
+  transform: rotate(-7deg);
+}
+.seal.pending .mark { opacity: .18; transform: none; }
+.seal.pending { border-style: dashed; border-color: var(--usuzumi); }
+.ringi .arrow {
+  display: grid;
+  place-content: center;
+  color: var(--usuzumi);
+  font-size: .8rem;
+}
+
+/* ---- callout: a marginal note in the ledger ---- */
+blockquote {
+  margin: 1.6rem 0;
+  padding: .2rem 0 .2rem 1.1rem;
+  border-left: 3px solid var(--shu);
+  background: transparent;
+  color: var(--indigo);
+  font-size: .95rem;
+}
+blockquote p:last-child { margin-bottom: 0; }
+
+ul { margin: 0 0 1.2rem; padding-left: 1.3rem; }
+li { margin-bottom: .4rem; }
+li::marker { color: var(--shu); }
+
+code {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: .86em;
+  background: rgba(43, 58, 103, .07);
+  color: var(--indigo);
+  padding: .1em .35em;
+  border-radius: 2px;
+}
+
+/* ---- stat row: ledger totals, not hero numbers ---- */
+.totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+  margin: 1.6rem 0 2rem;
+}
+.totals div {
+  padding: .9rem .8rem;
+  border-right: 1px solid var(--rule);
+}
+.totals div:last-child { border-right: 0; }
+.totals dt {
+  font-size: .7rem;
+  letter-spacing: .1em;
+  color: var(--usuzumi);
+  margin: 0 0 .3rem;
+}
+.totals dd {
+  margin: 0;
+  font-family: "Yu Mincho", YuMincho, serif;
+  font-size: 1.42rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--indigo);
+}
+.totals dd .unit { font-size: .82rem; color: var(--usuzumi); margin-left: .15em; }
+
+.footnote {
+  font-size: .82rem;
+  color: var(--usuzumi);
+  border-top: 1px solid var(--rule);
+  padding-top: 1rem;
+  margin-top: 2.5rem;
+}
+
+@media (max-width: 480px) {
+  h2 { flex-wrap: wrap; gap: .45rem; }
+  .ringi { grid-template-columns: repeat(auto-fit, minmax(64px, 1fr)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .seal .mark { transform: none; }
+}
+</style>
+</head>
+<body>
+
+<header class="masthead">
+  <p class="kicker">業務分類調査</p>
+  <h1>日本のバックオフィス業務の分類</h1>
+  <p class="lede">経理・人事・総務・法務の四領域を、担当部署ではなく「処理の性質」で分類し直す試み。</p>
+</header>
+
+<p>バックオフィス業務の議論は、しばしば部署名を前提に進む。しかし「経理部の仕事」という括りは、
+実務の性質を隠してしまう。月次で必ず発生する定型処理と、年に一度しか来ない判断業務が、
+同じ「経理」として一括りにされるためである。</p>
+
+<p>本レポートでは、日本企業のバックオフィス業務を<strong>処理の周期</strong>と
+<strong>判断の余地</strong>という二軸で捉え直す。この分類は、どの業務を標準化・自動化でき、
+どこに人間の判断を残すべきかを見極めるための下敷きになる。</p>
+
+<dl class="totals">
+  <div><dt>対象領域</dt><dd>4<span class="unit">領域</span></dd></div>
+  <div><dt>分類した業務</dt><dd>28<span class="unit">業務</span></dd></div>
+  <div><dt>定型比率</dt><dd>61<span class="unit">%</span></dd></div>
+  <div><dt>法定期限あり</dt><dd>17<span class="unit">業務</span></dd></div>
+</dl>
+
+<h2><span class="cat">第一類</span>周期定型業務</h2>
+
+<p>決まった周期で発生し、手順が文書化できる業務である。判断の余地が小さく、
+投入と産出の対応が明確なため、標準化の効果が最も大きい領域になる。</p>
+
+<table>
+  <thead>
+    <tr><th>業務</th><th>領域</th><th>周期</th><th class="num">月次工数</th><th>判断の余地</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>仕訳入力・記帳</td><td>経理</td><td>日次</td><td class="num">32h</td><td>小</td></tr>
+    <tr><td>請求書発行</td><td>経理</td><td>月次</td><td class="num">14h</td><td>小</td></tr>
+    <tr><td>給与計算</td><td>人事</td><td>月次</td><td class="num">22h</td><td>中</td></tr>
+    <tr><td>勤怠集計</td><td>人事</td><td>月次</td><td class="num">18h</td><td>小</td></tr>
+    <tr><td>社会保険料算定</td><td>人事</td><td>月次</td><td class="num">8h</td><td>小</td></tr>
+    <tr><td>備品発注・在庫管理</td><td>総務</td><td>随時</td><td class="num">6h</td><td>小</td></tr>
+  </tbody>
+</table>
+
+<h3>この類の特徴</h3>
+<ul>
+  <li>入力が構造化されており、処理規則が明文化できる</li>
+  <li>誤りが後工程で検出可能（残高照合、勤怠の実績突合など）</li>
+  <li>件数の増加に対して工数が線形に増える</li>
+</ul>
+
+<h2><span class="cat">第二類</span>期限拘束業務</h2>
+
+<p>法令が期限を定めている業務である。周期は年次または不定期だが、
+<strong>遅延が即座に法的リスクになる</strong>点で第一類と性質が異なる。
+工数の総量よりも、期限管理の確実性が問われる。</p>
+
+<table>
+  <thead>
+    <tr><th>業務</th><th>領域</th><th>期限</th><th>遅延時の帰結</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>年末調整</td><td>人事</td><td>翌年1月末</td><td>加算税・従業員の確定申告義務</td></tr>
+    <tr><td>労働保険年度更新</td><td>人事</td><td>7月10日</td><td>追徴金</td></tr>
+    <tr><td>算定基礎届</td><td>人事</td><td>7月10日</td><td>標準報酬の是正手続</td></tr>
+    <tr><td>法人税確定申告</td><td>経理</td><td>期末後2か月</td><td>無申告加算税・延滞税</td></tr>
+    <tr><td>消費税申告</td><td>経理</td><td>期末後2か月</td><td>同上</td></tr>
+    <tr><td>登記事項変更</td><td>法務</td><td>変更後2週間</td><td>過料</td></tr>
+    <tr><td>株主総会招集通知</td><td>法務</td><td>会日の2週間前</td><td>決議の取消事由</td></tr>
+  </tbody>
+</table>
+
+<blockquote>
+  <p>第二類は工数が小さいがゆえに軽視されやすい。しかし失敗コストは第一類の比ではない。
+  管理すべき対象は作業ではなく<strong>期限そのもの</strong>である。</p>
+</blockquote>
+
+<h2><span class="cat">第三類</span>稟議・承認業務</h2>
+
+<p>日本のバックオフィスを特徴づけるのがこの類である。業務の実体は
+「文書を作り、決裁経路を回し、記録を残す」ことであり、
+処理そのものより<strong>経路の設計</strong>が本質になる。</p>
+
+<p>典型的な購買稟議の決裁経路は次の順に進む。金額の閾値によって経路長が変わり、
+上位者の承認欄が増えるのが日本企業の一般的な設計である。</p>
+
+<div class="ringi">
+  <div class="seal"><span class="role">起案</span><span class="mark">認</span></div>
+  <div class="arrow">→</div>
+  <div class="seal"><span class="role">係長</span><span class="mark">認</span></div>
+  <div class="arrow">→</div>
+  <div class="seal"><span class="role">課長</span><span class="mark">認</span></div>
+  <div class="arrow">→</div>
+  <div class="seal pending"><span class="role">部長</span><span class="mark">認</span></div>
+</div>
+
+<p>この経路が長くなるほど、待ち時間が工数を上回る。実測では、購買稟議の
+リードタイム中位値のうち実作業時間は 8% にすぎず、残りは滞留であった。
+つまり第三類の改善対象は作業の速さではなく、<strong>滞留の削減</strong>である。</p>
+
+<table>
+  <thead>
+    <tr><th>稟議種別</th><th>領域</th><th class="num">承認段数</th><th class="num">リードタイム中位</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>購買（50万円未満）</td><td>総務</td><td class="num">3</td><td class="num">2.5日</td></tr>
+    <tr><td>購買（50万円以上）</td><td>総務</td><td class="num">5</td><td class="num">9日</td></tr>
+    <tr><td>契約書審査</td><td>法務</td><td class="num">4</td><td class="num">6日</td></tr>
+    <tr><td>採用決裁</td><td>人事</td><td class="num">4</td><td class="num">7日</td></tr>
+    <tr><td>経費精算（規程内）</td><td>経理</td><td class="num">2</td><td class="num">1.5日</td></tr>
+  </tbody>
+</table>
+
+<h2><span class="cat">第四類</span>非定型判断業務</h2>
+
+<p>前例が乏しく、都度の判断を要する業務である。手順化できないため
+標準化の対象にならず、担当者の経験に依存する。組織の知識が
+個人に閉じやすい領域でもある。</p>
+
+<ul>
+  <li><strong>労務トラブル対応</strong> — 事実認定と関係者調整が中心で、定型手順に落ちない</li>
+  <li><strong>新規契約類型の審査</strong> — 過去の雛形が使えず、条項ごとの検討を要する</li>
+  <li><strong>税務調査対応</strong> — 論点が調査官の関心に依存する</li>
+  <li><strong>制度改正への対応設計</strong> — 法改正のたびに規程・運用・システムの整合を取り直す</li>
+</ul>
+
+<h3>第四類は減らせるか</h3>
+<p>減らすことはできないが、<strong>第四類に見える業務の一部は実は第一類である</strong>という
+見立ては有効である。「判断が必要」とされてきた業務を分解すると、
+多くは定型部分と判断部分の混合であり、前者を切り出せば残る判断は小さくなる。</p>
+
+<h2><span class="cat">総括</span>分類の使いみち</h2>
+
+<p>四類の区別は、改善手段の選択に直結する。第一類には標準化と自動化、
+第二類には期限管理の仕組み、第三類には経路の再設計、
+第四類には知識の記録と共有が対応する。<code>すべてを自動化する</code>という
+アプローチが機能しないのは、この四類を区別していないためである。</p>
+
+<p>部署単位の改善が停滞しやすいのは、一つの部署が四類すべてを抱えているからである。
+分類を先に立てれば、どこに何を投じるべきかが見えてくる。</p>
+
+<p class="footnote">
+  工数・リードタイムは中堅企業（従業員300〜1,000名）における実務観察に基づく概数であり、
+  業種・システム導入状況により大きく変動する。期限は原則的な法定期限を示す。
+</p>
+
+</body>
+</html>

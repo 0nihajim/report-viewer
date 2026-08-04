@@ -80,10 +80,20 @@ curl -s "$BASE/r/smoke-test-report" -o /tmp/rv_report.html
 check "GET /r/<id>" "$(code "$BASE/r/smoke-test-report")" "200"
 
 echo "  -- dangerous content must be stripped --"
+# NOTE: author CSS is deliberately NOT stripped any more -- reports are allowed
+# their own visual identity. Cosmetic declarations like hotpink / Comic Sans now
+# survive on purpose; what must not survive is anything executable or anything
+# that escapes the .report scope. See scripts/test-css.sh for that contract.
 for pat in "alert(" "onload=" "onclick=" "javascript:" "<script" "<iframe" \
-           "evil.example.com" "hotpink" "Comic Sans" "bgcolor" 'width="1400"' "document.cookie"; do
+           "evil.example.com" "bgcolor" 'width="1400"' "document.cookie"; do
   check "stripped: $pat" "$(countf /tmp/rv_report.html "$pat")" "0"
 done
+
+echo "  -- author CSS passes through, but scoped --"
+check "author CSS kept" "$(countf /tmp/rv_report.html 'hotpink')" "1"
+check "report style block injected" "$(countf /tmp/rv_report.html 'report-supplied, sanitized')" "1"
+check "no unscoped body rule from report" \
+  "$(grep -oE '(^|})[[:space:]]*body[[:space:]]*\{[^}]*hotpink' /tmp/rv_report.html | wc -l | tr -d ' ')" "0"
 
 echo "  -- expected structure must survive --"
 check "table wrapped in .tw" "$(countf /tmp/rv_report.html '<div class="tw"><table')" "1"

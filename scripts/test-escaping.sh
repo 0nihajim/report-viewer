@@ -25,6 +25,8 @@ html = """<html><body><h1>エスケープ検証</h1>
 <p>改行で折り返された文である。
   次の行に続く文。
   さらに続く文。</p>
+<p>処理が終わっていない。 span を早期に終了させる。 TTFT は別に記録する。</p>
+<p>括弧の検証 （openai, anthropic 等）、 および 「引用」 の扱い。</p>
 <pre><code>if a &lt; b:
     x = 1   # 空白 は  保持   される
 </code></pre>
@@ -64,6 +66,20 @@ b=re.sub(r'<pre.*?</pre>','',h,flags=re.S)
 CJK=r'\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff\u3000-\u303f'
 print(len(re.findall(rf'[{CJK}]\s+[{CJK}]',b)))
 ")" "0"
+
+echo "=== punctuation followed by Latin (the reported bug) ==="
+# "。 span" had a visible hole: closing punctuation carries its own trailing
+# space in the glyph, so a following space is wrong even before Latin text.
+check "'。 span' tightened"        "$(cnt '。 span')" "0"
+check "'。span を' present"        "$(cnt '。span を')" "1"
+check "'。 TTFT' tightened"        "$(cnt '。 TTFT')" "0"
+check "'。TTFT は' present"        "$(cnt '。TTFT は')" "1"
+check "'）、 および' tightened"    "$(cnt '）、 および')" "0"
+check "space before 「 removed"    "$(cnt ' 「引用」')" "0"
+check "space before （ removed"    "$(cnt ' （openai')" "0"
+# Latin-to-Latin spacing must survive untouched.
+check "'openai, anthropic' kept"   "$(cnt 'openai, anthropic')" "1"
+check "'span を早期に' kept"       "$(cnt 'span を早期に')" "1"
 
 echo "=== latin spacing preserved ==="
 # "演算子 は" is CJK on both sides, so it is *correctly* tightened. Use a real

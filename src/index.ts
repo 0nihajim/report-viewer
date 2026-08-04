@@ -288,7 +288,7 @@ export default {
         if (!obj) return errorPage(404, 'レポートが見つかりませんでした');
 
         const raw = await obj.text();
-        const { html: content, headings } = await sanitizeReport(raw);
+        const { html: content, headings, css: reportCss } = await sanitizeReport(raw);
         const meta = metaFromObject(obj);
 
         // Raw view escape hatch for debugging what the generator produced.
@@ -298,7 +298,7 @@ export default {
           });
         }
 
-        return html(renderReport(meta, content, headings, siteTitle), 200, {
+        return html(renderReport(meta, content, headings, siteTitle, reportCss), 200, {
           'last-modified': obj.uploaded.toUTCString(),
         });
       }
