@@ -82,6 +82,8 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
 
   // Tracks the heading currently being streamed so we can accumulate its text.
   let currentHeading: { level: number; id: string; text: string } | null = null;
+  // >0 while inside <pre>/<code>, where whitespace must be preserved verbatim.
+  let preDepth = 0;
 
   const rewriter = new HTMLRewriter()
     .on('title', {
@@ -147,6 +149,13 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
     .on('*', {
       element(el) {
         const tag = el.tagName.toLowerCase();
+        // Whitespace is significant inside code, so CJK tightening must skip it.
+        if (tag === 'pre' || tag === 'code') {
+          preDepth++;
+          el.onEndTag(() => {
+            preDepth--;
+          });
+        }
         const allowed = TAG_ATTRS[tag];
         for (const [name, value] of [...el.attributes]) {
           const lower = name.toLowerCase();
@@ -174,6 +183,24 @@ export async function sanitizeReport(source: string): Promise<SanitizeResult> {
         if (tag === 'table') {
           el.before('<div class="tw">', { html: true });
           el.after('</div>', { html: true });
+        }
+      },
+      text(t) {
+        // Source line breaks become spaces in HTML, which looks wrong between
+        // Japanese characters. Tighten them everywhere except inside code.
+        if (preDepth === 0) {
+          const tightened = tightenCjk(t.text);
+          if (tightened !== t.text) {
+            // t.text is NOT entity-decoded — it arrives as the raw source text
+            // (verified: a chunk reads "a &lt; b"). replace() without
+            // `html: true` re-escapes the ampersands, yielding "&amp;lt;" which
+            // renders as the literal string "&lt;". So we must insert as HTML.
+            //
+            // This is safe because tightenCjk only *removes* spaces between two
+            // CJK codepoints; it never introduces '<', '>' or '&', so the chunk
+            // stays exactly as already-sanitized as it arrived.
+            t.replace(tightened, { html: true });
+          }
         }
       },
     });
@@ -214,4 +241,22 @@ export function esc(s: string): string {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Collapse the ASCII space that source line breaks leave between CJK characters.
+ *
+ * Report generators wrap prose in the HTML source, and HTML turns each newline
+ * into a space. In English that's correct; in Japanese it produces visible holes
+ * mid-sentence ("依存しており、 長期的な"). We only remove the space when both
+ * neighbours are CJK/full-width, so "span 属性" and "LLM アプリ" keep the
+ * intentional spacing around Latin runs.
+ */
+const CJK =
+  '\\u3000-\\u303f\\u3040-\\u309f\\u30a0-\\u30ff\\u3400-\\u4dbf\\u4e00-\\u9fff\\uf900-\\ufaff\\uff00-\\uff60\\uffe0-\\uffe6';
+const CJK_GAP = new RegExp(`([${CJK}])[ \\t]+(?=[${CJK}])`, 'g');
+
+export function tightenCjk(text: string): string {
+  // Two passes: a single pass misses runs like "。 、 あ" where matches overlap.
+  return text.replace(CJK_GAP, '$1').replace(CJK_GAP, '$1');
 }
