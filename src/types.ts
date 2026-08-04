@@ -1,6 +1,12 @@
 export interface Env {
   REPORTS: R2Bucket;
   SITE_TITLE: string;
+  /**
+   * Footer line. Set per deployment: the Cloudflare Access wording is only true
+   * where Access actually fronts the Worker, so the public GitHub Pages preview
+   * overrides it rather than claiming protection it doesn't have.
+   */
+  FOOTER_NOTE?: string;
   /** Bearer token required by the ingest endpoints. Set via `wrangler secret put INGEST_TOKEN`. */
   INGEST_TOKEN?: string;
 }

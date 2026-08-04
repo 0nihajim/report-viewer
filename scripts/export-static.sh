@@ -85,4 +85,22 @@ echo "    icon.png, favicon.ico, manifest.webmanifest"
 touch "$OUT/.nojekyll"
 rm -rf "$OUT/.tmp"
 
+# The GitHub Pages preview has no access control, so the Worker's default footer
+# ("protected by Cloudflare Access") would be a false claim about this copy.
+# Rewrite it here rather than standing up a second dev server just for the note.
+if [ -n "${FOOTER_NOTE:-}" ]; then
+  python3 - "$OUT" "$FOOTER_NOTE" <<'PY'
+import pathlib, sys
+out, note = pathlib.Path(sys.argv[1]), sys.argv[2]
+old = '非公開ビューア（Cloudflare Access 保護）'
+n = 0
+for f in out.rglob('*.html'):
+    t = f.read_text(encoding='utf-8')
+    if old in t:
+        f.write_text(t.replace(old, note), encoding='utf-8')
+        n += 1
+print(f'    footer note rewritten in {n} file(s)')
+PY
+fi
+
 echo "==> done: $count report(s) + index -> $OUT"

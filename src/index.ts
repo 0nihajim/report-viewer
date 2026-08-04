@@ -277,7 +277,7 @@ export default {
 
       // ---------------- HTML views ----------------
       if (path === '/' || path === '/index.html') {
-        return html(renderList(await listReports(env), siteTitle));
+        return html(renderList(await listReports(env), siteTitle, env.FOOTER_NOTE));
       }
 
       if (path.startsWith('/r/')) {
@@ -307,7 +307,7 @@ export default {
           });
         }
 
-        return html(renderReport(meta, content, headings, siteTitle, reportCss), 200, {
+        return html(renderReport(meta, content, headings, siteTitle, reportCss, env.FOOTER_NOTE), 200, {
           'last-modified': obj.uploaded.toUTCString(),
         });
       }

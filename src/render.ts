@@ -738,6 +738,12 @@ function layout(opts: {
   reportCss?: string;
   /** Inline script appended before </body> (figure drawing, list filtering). */
   script?: string;
+  /**
+   * Footer line. Stating "protected by Cloudflare Access" on a deployment that
+   * has no access control is a lie the reader can act on, so the note travels
+   * with the deployment instead of being hardcoded.
+   */
+  footerNote: string;
 }): string {
   return `<!doctype html>
 <html lang="ja">
@@ -770,7 +776,7 @@ ${opts.reportCss ? `<style>/* report-supplied, sanitized + scoped to .report */\
   </header>
   ${opts.body}
   <footer>
-    <span>Cloudflare Access で保護された非公開ビューア</span>
+    <span>${esc(opts.footerNote)}</span>
   </footer>
 </div>
 ${opts.script ? `<script>${opts.script}</script>` : ''}
@@ -815,7 +821,15 @@ const LIST_JS = `
 })();
 `;
 
-export function renderList(reports: ReportMeta[], siteTitle: string): string {
+/**
+ * Footer note when the deployment doesn't say otherwise. The Cloudflare Access
+ * wording only applies to the private deployment; the GitHub Pages preview has
+ * no access control, and claiming otherwise there would mislead the reader about
+ * whether the content is public.
+ */
+const FOOTER_DEFAULT = '非公開ビューア（Cloudflare Access 保護）';
+
+export function renderList(reports: ReportMeta[], siteTitle: string, footerNote = FOOTER_DEFAULT): string {
   const body =
     reports.length === 0
       ? `<p class="empty">レポートがまだありません。<br>生成側から <code>POST /api/reports</code> で投入してください。</p>`
@@ -843,7 +857,7 @@ ${reports
   </ul>
   <p class="empty" id="nohit" hidden>該当するレポートがありません。</p>`;
 
-  return layout({ title: siteTitle, siteTitle, body, showHome: false, script: LIST_JS });
+  return layout({ title: siteTitle, siteTitle, body, showHome: false, script: LIST_JS, footerNote });
 }
 
 export function renderReport(
@@ -852,6 +866,7 @@ export function renderReport(
   headings: Heading[],
   siteTitle: string,
   reportCss = '',
+  footerNote = FOOTER_DEFAULT,
 ): string {
   // Only bother with a TOC when there is real structure to navigate.
   const tocItems = headings.filter((h) => h.level >= 2);
@@ -880,7 +895,10 @@ ${tocItems
 ${heading}${contentHtml}
   </article>`;
 
-  return layout({ title: meta.title, siteTitle, body, showHome: true, reportCss, script: FIGURE_JS });
+  return layout({
+    title: meta.title, siteTitle, body, showHome: true,
+    reportCss, script: FIGURE_JS, footerNote,
+  });
 }
 
 export function renderManifest(siteTitle: string): string {
