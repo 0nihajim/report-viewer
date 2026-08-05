@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <title>CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</title>
+</head>
+<body>
+
+<p class="eyebrow">可観測性コスト設計</p>
+<h1>CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</h1>
+<p class="lede">Infrequent Access は「Logs Insights で読むが、リアルタイムに反応しないログ」専用の器であり、取り込み単価を半額にする代償はサブスクリプションフィルタ・メトリクスフィルタ・Live Tail・GetLogEvents の喪失に集約される。</p>
+
+<div class="figures">
+  <div class="figure">
+    <div class="figure-label">取り込み単価（東京・カスタムログ）</div>
+    <div class="figure-value">0.38<span class="unit">USD/GB</span></div>
+    <div class="figure-delta down">Standard 比 −50%</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">保管単価（東京・Standard 階層）</div>
+    <div class="figure-value">0.033<span class="unit">USD/GB-月</span></div>
+    <div class="figure-delta up">ログクラスで差なし</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">Logs Insights QL 非対応コマンド</div>
+    <div class="figure-value">4<span class="unit">個</span></div>
+    <div class="figure-delta down">pattern / diff / filterIndex / unmask</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">ログクラスの事後変更</div>
+    <div class="figure-value">不可</div>
+    <div class="figure-delta down">作り直しのみ</div>
+  </div>
+</div>
+
+<h2>結論を先に</h2>
+
+<p>CloudWatch Logs のコスト構造は取り込み・保管・クエリの三つに分解できるが、東京リージョンでは取り込みが圧倒的に支配的である。カスタムログの取り込みは 1 GB あたり 0.76 USD、保管は 1 GB-月あたり 0.033 USD なので、<strong>1 GB を取り込む費用は同じ 1 GB を約 23 か月保管する費用に等しい</strong>。[7] つまり保管側の最適化だけでは請求書は動かない。</p>
+
+<p>2025 年に追加された Intelligent Tiering は 30 日／90 日アクセスなしでの自動階層化により保管費を下げるが、対象は保管費のみで、取り込み費には一切効かない。[3][6] 取り込み費を下げる手段は、ログクラスを作成時に Infrequent Access（以下 IA）にしておくこと、あるいはそもそも送らないこと、この二つしかない。</p>
+
+<div class="callout note">
+  <p>IA と Intelligent Tiering は競合しない。<strong>IA は「入口の単価」を半額にする作成時の決定</strong>、<strong>Intelligent Tiering は「置き場の単価」を後から下げるアカウント単位の設定</strong>であり、併用が正解になる場面が多い。</p>
+</div>
+
+<h2>料金の実データ</h2>
+
+<p>以下は AWS Price List API のオファーファイル（AmazonCloudWatch、ap-northeast-1、公開日 2026-08-03）から取得した実値である。[7] 料金ページの表は JavaScript で描画されるため、請求上の意味（usagetype）まで確認できるオファーファイルを一次情報とした。</p>
+
+<h3>取り込み（Collect / Delivery）</h3>
+
+<table>
+  <thead>
+    <tr><th>区分</th><th>usagetype</th><th class="num">Standard (USD/GB)</th><th class="num">IA (USD/GB)</th><th class="num">差</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>カスタムログ（PutLogEvents）</td><td>DataProcessing[IA]-Bytes</td><td class="num">0.76</td><td class="num">0.38</td><td class="num">−50%</td></tr>
+    <tr><td>Vended ログ 最初の 10 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.76</td><td class="num">0.38</td><td class="num">−50%</td></tr>
+    <tr><td>Vended ログ 次の 20 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.38</td><td class="num">0.228</td><td class="num">−40%</td></tr>
+    <tr><td>Vended ログ 次の 20 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.152</td><td class="num">0.114</td><td class="num">−25%</td></tr>
+    <tr><td>Vended ログ 50 TB 超</td><td>VendedLog[IA]-Bytes</td><td class="num">0.076</td><td class="num">0.076</td><td class="num">0%</td></tr>
+  </tbody>
+</table>
+
+<p>単純な「IA は半額」は<strong>カスタムログと 10 TB 以下の vended ログにのみ成り立つ</strong>。vended ログは階層ごとに割引率が縮小し、50 TB を超えた帯域では Standard と IA の単価が一致する。月間 80 TB 規模になると IA の削減効果は 37% まで落ちる。CloudFront ログ（CFLogs）は独立した単価体系で、最初の 10 TB が Standard 0.50 / IA 0.25 USD/GB である。[7]</p>
+
+<h3>保管とクエリ</h3>
+
+<table>
+  <thead>
+    <tr><th>区分</th><th>usagetype</th><th class="num">東京 (USD)</th><th class="num">バージニア北部 (USD)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>保管 Standard 階層</td><td>TimedStorage-ByteHrs</td><td class="num">0.033 /GB-月</td><td class="num">0.030 /GB-月</td></tr>
+    <tr><td>保管 Infrequent Access 階層</td><td>TimedStorage-IA-ByteHrs</td><td class="num">0.0198 /GB-月</td><td class="num">0.018 /GB-月</td></tr>
+    <tr><td>保管 Archive Instant Access 階層</td><td>TimedStorage-AIA-ByteHrs</td><td class="num">0.0066 /GB-月</td><td class="num">0.006 /GB-月</td></tr>
+    <tr><td>Logs Insights スキャン</td><td>DataScanned-Bytes</td><td class="num">0.0076 /GB</td><td class="num">0.005 /GB</td></tr>
+    <tr><td>取り込み（カスタム・Standard クラス）</td><td>DataProcessing-Bytes</td><td class="num">0.76 /GB</td><td class="num">0.50 /GB</td></tr>
+  </tbody>
+</table>
+
+<p>保管の三階層は Intelligent Tiering の階層名であり、ログクラスとは別軸である。<strong>ログクラスは保管単価に影響しない</strong>ことが公式ドキュメントに明記されている。[1] 東京の取り込みはバージニア北部の 1.52 倍で、保管の 1.10 倍・スキャンの 1.52 倍と比べても取り込みの地域差が最も体感しやすい。</p>
+
+<figure class="viz">
+  <figcaption>月間取り込み費用（東京・vended ログ・階層料金適用後）</figcaption>
+  <div class="vizbody">
+    <div class="bars" data-max="22000" data-label="USD/月">
+      <div class="bar" data-value="3891"><span class="blabel">5 TB / Standard</span><span class="bval">3,891</span></div>
+      <div class="bar" data-value="1946" data-tone="positive"><span class="blabel">5 TB / IA</span><span class="bval">1,946</span></div>
+      <div class="bar" data-value="15565"><span class="blabel">30 TB / Standard</span><span class="bval">15,565</span></div>
+      <div class="bar" data-value="8561" data-tone="positive"><span class="blabel">30 TB / IA</span><span class="bval">8,561</span></div>
+      <div class="bar" data-value="21012"><span class="blabel">80 TB / Standard</span><span class="bval">21,012</span></div>
+      <div class="bar" data-value="13230" data-tone="caution"><span class="blabel">80 TB / IA</span><span class="bval">13,230</span></div>
+    </div>
+  </div>
+  <p class="note">[7] の単価に階層境界（最初の10TB／次の20TB／次の20TB／50TB超）を適用した計算値。1 TB = 1,024 GB。5 TB では削減 50%、30 TB で 45%、80 TB で 37% に縮小する。</p>
+</figure>
+
+<h2>IA ログクラスの制約</h2>
+
+<p>制約は公式の機能対応表が正典である。[1] 発表時（2023 年 11 月）のブログの表とは既に差異があり、<strong>データ保護マスキングと取り込み時変換は当時「利用不可」だったが現在は IA でも対応している</strong>。[5][11][1] 発表ブログを根拠に判断すると過剰に制約を見積もることになる。</p>
+
+<h3>使えない機能</h3>
+
+<table>
+  <thead>
+    <tr><th>失う機能</th><th>実務上の意味</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>サブスクリプションフィルタ</td><td>Kinesis / Firehose / Lambda / OpenSearch への準リアルタイム転送が不可。[8] SIEM や外部 SaaS への配信経路を持てない</td></tr>
+    <tr><td>メトリクスフィルタ</td><td>ログからカスタムメトリクスを抽出できず、<strong>ログ内容に対する CloudWatch アラームが作れない</strong>[9]</td></tr>
+    <tr><td>Live Tail</td><td>障害中の追尾（tail -f 相当）が不可[10]</td></tr>
+    <tr><td>GetLogEvents / FilterLogEvents API</td><td>ログストリームの単純な時系列閲覧ができず、参照は Logs Insights 経由に限定される[1]</td></tr>
+    <tr><td>フィールドインデックス</td><td>既定のインデックスも作成も不可。[16][1] 高頻度クエリでスキャン量を削れない</td></tr>
+    <tr><td>フィールド自動検出（公式記述に矛盾あり）</td><td>ログクラス比較表は IA でも「discovered fields」を対応と記す[1]が、Logs Insights のフィールド解説ページは「フィールド検出は Standard ログクラスのみ」と明記する。[19] 依存する設計にする前に自環境で実測すべき箇所</td></tr>
+    <tr><td>Facets / 自然言語クエリ支援 / 前期間比較</td><td>コンソールの探索支援 UI が縮小する[1]</td></tr>
+    <tr><td>ログ異常検出（Anomaly Detection）</td><td>異常パターンの自動抽出とそれに対するアラームが不可[1]</td></tr>
+    <tr><td>Container Insights / Lambda Insights のログ取り込み</td><td>両 Insights の宛先ロググループには使えない[1]</td></tr>
+    <tr><td>埋め込みメトリクスフォーマット（EMF）</td><td>ログ経由のメトリクス発行が成立しない[1]</td></tr>
+    <tr><td>Logs Insights QL の 4 コマンド</td><td><code>pattern</code>・<code>diff</code>・<code>filterIndex</code>・<code>unmask</code> が非対応。それ以外の全コマンドは使える[2]</td></tr>
+  </tbody>
+</table>
+
+<h3>使える機能</h3>
+
+<div class="versus">
+  <div>
+    <h4>IA でも維持される</h4>
+    <ul>
+      <li>フルマネージドな取り込みと保管[1]</li>
+      <li>Logs Insights QL（上記 4 コマンド以外の全て）[2]</li>
+      <li>OpenSearch PPL / SQL によるクエリ[1]</li>
+      <li>スケジュールドクエリ（S3 / EventBridge / ルックアップテーブルへ結果配信）[1][14]</li>
+      <li>取り込み時変換（CloudWatch Pipeline）[1][12]</li>
+      <li>機密データのマスキング[1][11]</li>
+      <li>KMS による暗号化[1]</li>
+      <li>クロスアカウント分析・集約[1]</li>
+      <li>S3 へのエクスポート／S3 Tables 連携（Iceberg）[1][13]</li>
+    </ul>
+  </div>
+  <div>
+    <h4>設計上の非対称性</h4>
+    <ul>
+      <li>アラームは「ログ内容」からは張れないが、<strong>スケジュールドクエリ + EventBridge</strong> で分単位の準リアルタイム検知は組める[14][15]</li>
+      <li>外部への配信はサブスクリプション（ストリーム型）が使えないため、S3 Tables 連携かスケジュールドクエリ（バッチ型）に置き換える[13][14]</li>
+      <li>フィールドインデックスがないぶんスキャン費が効くので、クエリは必ず時間範囲で絞る</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn">
+  <p>最大の非可逆性は<strong>ログクラスが作成後に変更できない</strong>ことである。[1][4] 判断を誤った場合の是正は、新しいロググループを作って送信先を切り替え、古い方をリテンション満了で枯らす、という移行作業になる。ロググループ名を変えられない事情があるならさらに厄介で、命名規約に世代を含めておくと安全である。</p>
+</div>
+
+<h3>API・IaC 上の指定</h3>
+
+<p>ログクラスは <code>CreateLogGroup</code> の <code>logGroupClass</code> で指定し、有効値は <code>STANDARD</code> / <code>INFREQUENT_ACCESS</code> / <code>DELIVERY</code> の三つである。省略時は <code>STANDARD</code>。[4] OpenTofu / Terraform では <code>aws_cloudwatch_log_group</code> の <code>log_group_class</code> に対応する。第三の <code>DELIVERY</code> クラスは Lambda ログを S3 / Firehose へ中継する専用で、CloudWatch Logs 内の保持は固定 2 日（API リファレンスは 1 日と記述しており記述に揺れがある）、Logs Insights も使えないため、本レポートの選択肢には含めない。[1][4]</p>
+
+<p>IA ログクラスは中国および GovCloud を除く全リージョンで利用可能。[5] Intelligent Tiering は中東（バーレーン）と中東（UAE）を除く全商用リージョンで、アカウント×リージョン単位で <code>PutStorageTierPolicy</code>（CLI では <code>aws logs put-storage-tier-policy --storage-tier INTELLIGENT_TIERING</code>）で有効化する。[3]</p>
+
+<h2>どのログタイプに向くか</h2>
+
+<p>公式の指針は明快で、AWS 自身が「IA は機能が少ないが<strong>大多数のユースケースに適する</strong>」とコスト最適化ガイドで述べている。[6] 発表ブログはより具体的に、デバッグログ・Web サーバログ・IoT フリートの詳細ログ・コンプライアンス保持用ログを挙げている。[5] これを判定基準に落とすと、次の三つの問いに全て「いいえ」なら IA が正解になる。</p>
+
+<ol>
+  <li>このログの内容を条件にアラームを鳴らす必要があるか（メトリクスフィルタ／異常検出）</li>
+  <li>このログを外部システムへストリームとして流す必要があるか（サブスクリプションフィルタ）</li>
+  <li>障害対応中にこのログを Live Tail で追う運用があるか</li>
+</ol>
+
+<table>
+  <thead>
+    <tr><th>ログタイプ</th><th>判定</th><th>根拠</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>VPC フローログ</td><td>IA 推奨</td><td>量が最も出るうえ、用途は事後のフォレンジックと通信経路の裏取り。閾値監視は CloudWatch メトリクス側で足りる</td></tr>
+    <tr><td>ALB / NLB / CloudFront アクセスログ</td><td>IA 推奨</td><td>可用性監視は ELB メトリクスが担当。ログは事後の 5xx 追跡やボット分析で、Logs Insights の集計だけで完結する</td></tr>
+    <tr><td>WAF ログ</td><td>条件付き IA</td><td>ブロック傾向の分析は IA で十分。ただし特定シグネチャの即時 SOC 連携が要件なら Standard（サブスクリプション必須）</td></tr>
+    <tr><td>アプリの DEBUG / TRACE レベル</td><td>IA 推奨</td><td>発表ブログが名指しする代表例。[5] ERROR 以上を別ロググループの Standard に分離し、DEBUG 以下を IA に落とす二段構成が最も費用対効果が高い</td></tr>
+    <tr><td>アプリの ERROR / WARN レベル</td><td>Standard</td><td>メトリクスフィルタでエラー率をアラーム化する対象。量も少ないので IA にする旨みがない</td></tr>
+    <tr><td>監査・コンプライアンス保持ログ</td><td>IA 推奨</td><td>照会頻度が低く長期保持。[5] Intelligent Tiering と併用すれば 90 日後に保管費も最安階層へ落ちる[3]</td></tr>
+    <tr><td>IoT / エッジデバイスの詳細ログ</td><td>IA 推奨</td><td>台数×verbose で量が支配的、参照は事後のフォレンジック[5]</td></tr>
+    <tr><td>バッチ・ETL のジョブ実行ログ</td><td>IA 推奨</td><td>失敗検知はジョブ側の状態遷移イベントで取れる。ログは原因調査時のみ読む</td></tr>
+    <tr><td>RDS / Aurora の一般ログ・スロークエリログ</td><td>IA 推奨</td><td>スロークエリ分析は Logs Insights の集計クエリで完結。Database Insights が別途メトリクスを持つ</td></tr>
+    <tr><td>EKS / ECS コンテナ標準出力（Container Insights 経由）</td><td>Standard 必須</td><td>Container Insights のログ取り込みが IA 非対応[1]</td></tr>
+    <tr><td>Lambda 関数ログ</td><td>Standard 寄り</td><td>Lambda Insights が IA 非対応[1]。EMF でメトリクスを出す実装なら IA では成立しない</td></tr>
+    <tr><td>CloudTrail 管理イベント</td><td>Standard</td><td>危険 API 呼び出しのメトリクスフィルタ + アラームが CIS 系ベンチマークの定番要件</td></tr>
+    <tr><td>EMF でメトリクスを埋め込むログ</td><td>Standard 必須</td><td>EMF が IA 非対応[1]</td></tr>
+  </tbody>
+</table>
+
+<h3>二段構成という実装</h3>
+
+<p>単一のログストリームを丸ごとどちらかに寄せる必要はない。実務で最も効くのは<strong>重要度でロググループを分割する</strong>設計である。ERROR 以上を Standard の小さなロググループへ、INFO 以下を IA の大きなロググループへ送れば、アラームとサブスクリプションは前者に、量は後者に集まる。CloudWatch エージェントや Fluent Bit の出力設定で分岐でき、アプリ側の変更は不要な場合が多い。</p>
+
+<p>Vended ログは送信先ロググループを IA で作成しておけばよく、請求は <code>VendedLogIA-Bytes</code> として計上される。[6] なお、ログを CloudWatch Logs ではなく S3 や Firehose へ直送してもデリバリ課金（<code>S3-Egress-Bytes</code> / <code>FH-Egress-Bytes</code>）は発生するため、「S3 に直送すればタダ」ではないことに注意する。[18]</p>
+
+<h3>失った機能を代替する</h3>
+
+<table>
+  <thead>
+    <tr><th>Standard の機能</th><th>IA での代替</th><th>差分</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>メトリクスフィルタ + アラーム</td><td>スケジュールドクエリ（最短 15 分間隔の cron）+ EventBridge → Lambda / SNS[14][15]</td><td>検知遅延が秒から分に。異常検知は自前のクエリ条件になる</td></tr>
+    <tr><td>サブスクリプションフィルタ → OpenSearch / SIEM</td><td>S3 Tables 連携（Iceberg）で Athena / Redshift から参照[13]</td><td>ストリームからバッチへ。S3 Tables 連携自体は追加料金なし[13]</td></tr>
+    <tr><td>サブスクリプションフィルタ → Lambda 加工</td><td>取り込み時変換（CloudWatch Pipeline）で事前整形[12]</td><td>取り込み後の再加工はできない。変換は不可逆[12]</td></tr>
+    <tr><td>Live Tail</td><td>短い時間範囲の Logs Insights を反復</td><td>リアルタイム性は失われる。Standard の小さなロググループを併設する方が実用的</td></tr>
+    <tr><td>FilterLogEvents による単純検索</td><td>Logs Insights の <code>filter</code></td><td>スキャン量課金（東京 0.0076 USD/GB）が発生する[7]</td></tr>
+  </tbody>
+</table>
+
+<p>S3 への定期エクスポートを恒常的なアーカイブ手段にするのは AWS 自身が非推奨としており、代替としてサブスクリプションを推奨している。[17] IA ではそのサブスクリプションが使えないため、<strong>アーカイブ目的なら S3 に逃がすのではなく、IA + Intelligent Tiering で CloudWatch Logs に置いたまま長期保持する</strong>のが素直な構成になる。</p>
+
+<h2>試算：30 TB/月の vended ログを 90 日保持</h2>
+
+<p>東京リージョン、VPC フローログ等の vended ログを月 30 TB 取り込み、リテンション 90 日で定常状態（保管 90 TB）とした場合の月額を、階層料金を適用して算出する。前提として 1 TB = 1,024 GB、圧縮率は考慮しない（AWS の課金対象バイト数をそのまま用いる）。</p>
+
+<table>
+  <thead>
+    <tr><th>構成</th><th class="num">取り込み (USD/月)</th><th class="num">保管 (USD/月)</th><th class="num">合計 (USD/月)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Standard クラス + Standard 保管</td><td class="num">15,564.80</td><td class="num">3,041.28</td><td class="num">18,606.08</td></tr>
+    <tr><td>IA クラス + Intelligent Tiering（90 日後 AIA 階層）</td><td class="num">8,560.64</td><td class="num">608.26</td><td class="num">9,168.90</td></tr>
+    <tr><td>差分</td><td class="num">−7,004.16</td><td class="num">−2,433.02</td><td class="num">−9,437.18</td></tr>
+  </tbody>
+</table>
+
+<p>取り込み内訳は Standard が 10 TB×0.76 + 20 TB×0.38 = 7,782.40 + 7,782.40、IA が 10 TB×0.38 + 20 TB×0.228 = 3,891.20 + 4,669.44 である。保管は全量が最安階層に落ちた理想状態を仮定しており（90 TB × 0.0066）、実際には直近 30 日分が Standard 階層に残るため保管費はこれより高くなる。<strong>この保管側の仮定は筆者の単純化であり、下限値である。</strong>それでも削減額の 74% が取り込み側から出ており、取り込み単価が支配的という冒頭の主張はこの試算でも変わらない。年額換算で約 113,246 USD の差になる。</p>
+
+<h2>アンチパターン</h2>
+
+<ul>
+  <li><strong>Intelligent Tiering を有効化したから取り込みも安くなったと考える。</strong>階層化は保管費のみに作用する[3]</li>
+  <li><strong>全ロググループを一律 IA にする。</strong>CloudTrail や ERROR ログのアラームが静かに作れなくなり、後戻りには作り直しが必要[1][4]</li>
+  <li><strong>EMF を使っているアプリのログを IA に送る。</strong>メトリクスが出なくなる[1]</li>
+  <li><strong>IA で節約した分をスキャン費で溶かす。</strong>フィールドインデックスが使えない[16]ため、時間範囲を絞らないダッシュボードクエリのコストが跳ねる</li>
+  <li><strong>Intelligent Tiering 環境で不要なクエリを回す。</strong>StartQuery / FilterLogEvents / GetLogEvents / CreateExportTask はアクセスと見なされ、下位階層のデータが 30 日間 Standard 階層に戻る[3]</li>
+  <li><strong>2023 年の発表ブログの機能表を現在の制約として使う。</strong>マスキングと取り込み時変換は既に IA 対応済み[1][5][11]</li>
+</ul>
+
+<h2>明日から打てる手（優先順）</h2>
+
+<ol>
+  <li>Cost and Usage Report で <code>DataProcessing-Bytes</code> / <code>VendedLog-Bytes</code> の上位ロググループを特定する。usagetype 名は[6]の対応表にある通りで、IA へ移った分は <code>DataProcessingIA-Bytes</code> / <code>VendedLogIA-Bytes</code> に現れるので移行効果もそのまま検証できる</li>
+  <li>上位ロググループごとに前掲の三つの問い（アラーム／外部ストリーム／Live Tail）を通す。全て「いいえ」なら IA 候補</li>
+  <li>Intelligent Tiering をアカウント×リージョン単位で有効化する。取り込み側の判断とは独立に、保管費だけが下がる。<code>StoredBytes</code> メトリクスの <code>StorageType</code> ディメンションで階層別の内訳を可視化できる（日次発行）[3]</li>
+  <li>新規ワークロードは最初から IA で作る。既存の是正は作り直しになるので、新設分の判断を誤らないことが最も効く</li>
+  <li>アプリログは重要度でロググループを分割する。ERROR 以上を Standard、INFO 以下を IA</li>
+  <li>IA へ移すロググループのうちアラームが必要だったものは、スケジュールドクエリ + EventBridge へ置き換える[14][15]</li>
+</ol>
+
+<h2>参考資料</h2>
+
+<ol>
+  <li>Log classes - Amazon CloudWatch Logs — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html</a></li>
+  <li>Logs Insights QL commands supported in log classes — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData_Classes.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData_Classes.html</a></li>
+  <li>Optimize storage costs with CloudWatch Logs Intelligent Tiering — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cwl_intelligent_tier.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cwl_intelligent_tier.html</a></li>
+  <li>CreateLogGroup API Reference — <a href="https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html">https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html</a></li>
+  <li>New Amazon CloudWatch log class for infrequent access logs at a reduced price (AWS News Blog, 2023-11-26) — <a href="https://aws.amazon.com/blogs/aws/new-amazon-cloudwatch-log-class-for-infrequent-access-logs-at-a-reduced-price">https://aws.amazon.com/blogs/aws/new-amazon-cloudwatch-log-class-for-infrequent-access-logs-at-a-reduced-price</a></li>
+  <li>CloudWatch billing and cost (usage types) — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html</a></li>
+  <li>AWS Price List API - AmazonCloudWatch ap-northeast-1 offer file — <a href="https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/ap-northeast-1/index.json">https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/ap-northeast-1/index.json</a></li>
+  <li>Subscription filters — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Subscriptions.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Subscriptions.html</a></li>
+  <li>Metric filters — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/MonitoringLogData.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/MonitoringLogData.html</a></li>
+  <li>Troubleshoot with CloudWatch Logs Live Tail — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html</a></li>
+  <li>Help protect sensitive log data with masking — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html</a></li>
+  <li>Transform logs during ingestion — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html</a></li>
+  <li>Access logs with S3 Tables Integration — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/s3-tables-integration.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/s3-tables-integration.html</a></li>
+  <li>Automating log analysis with scheduled queries — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/ScheduledQueries.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/ScheduledQueries.html</a></li>
+  <li>Understanding scheduled queries concepts — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/scheduled-queries-concepts.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/scheduled-queries-concepts.html</a></li>
+  <li>Create field indexes to improve query performance and reduce scan volume — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing.html</a></li>
+  <li>Exporting log data to Amazon S3 — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/S3Export.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/S3Export.html</a></li>
+  <li>Enable logging from AWS services (vended logs) — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/aws-services-sending-logs.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/aws-services-sending-logs.html</a></li>
+  <li>Supported logs and discovered fields — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html</a></li>
+</ol>
+
+<p class="source">出典: AWS 公式ドキュメントおよび AWS Price List API（AmazonCloudWatch / ap-northeast-1、publicationDate 2026-08-03）。取得日 2026-08-05。試算はいずれも本レポートで明示した前提に基づく計算値であり、AWS が公表した金額ではない。</p>
+
+</body>
+</html>
