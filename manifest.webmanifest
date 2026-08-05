@@ -1,0 +1,1 @@
+{"name": "Research Reports", "short_name": "Reports", "start_url": "/report-viewer/index.html", "display": "standalone", "background_color": "#16181c", "theme_color": "#16181c", "icons": [{"src": "/report-viewer/icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}]}

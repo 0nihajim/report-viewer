@@ -1,0 +1,989 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light dark">
+<meta name="robots" content="noindex, nofollow, noarchive">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Research Reports">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="/report-viewer/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/report-viewer/icon.png">
+<title>CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</title>
+<style>
+/* Tokens are normative in DESIGN.md (Google design.md spec, lint-clean).
+   Keep the two in sync: change DESIGN.md first, re-lint, then mirror here. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --bg-elev: #f6f7f9;
+  --bg-sunken: #eceef1;
+  --fg: #15181d;
+  --fg-muted: #555f6e;
+  --fg-faint: #5e6773;
+  --accent: #0b62d6;
+  --accent-soft: #e7f0fd;
+  --accent-ink: #08479b;
+  --border: #dde1e6;
+  --positive: #0f7b52;
+  --caution: #8a5a00;
+  --caution-bg: #fff8e6;
+  --critical: #b3261e;
+  --critical-bg: #fdecea;
+  --radius: 12px;
+  --radius-md: 8px;
+  --radius-sm: 4px;
+  --maxw: 46rem;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  --sans: -apple-system, BlinkMacSystemFont, "Hiragino Kaku Gothic ProN",
+          "Hiragino Sans", "Noto Sans JP", "Yu Gothic UI", sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181c;
+    --bg-elev: #22262c;
+    --bg-sunken: #2a2f36;
+    --fg: #e8eaed;
+    --fg-muted: #bcc3cd;
+    --fg-faint: #a2aab6;
+    --accent: #6aa9ff;
+    --accent-soft: #22344d;
+    --accent-ink: #b8d5ff;
+    --border: #343a42;
+    --positive: #5cc9a0;
+    --caution: #e0b65c;
+    --caution-bg: #2f2a1c;
+    --critical: #f0918a;
+    --critical-bg: #33211f;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  /* Pin the footer to the bottom on short pages instead of letting it float
+     in the middle of a mostly-empty viewport. */
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--sans);
+  font-size: 17px;
+  line-height: 1.8;
+  /* Respect the iPhone notch / home indicator. */
+  padding: 0 max(1rem, env(safe-area-inset-left)) env(safe-area-inset-bottom);
+  overflow-wrap: break-word;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: var(--maxw);
+  margin: 0 auto;
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+.wrap > footer { margin-top: auto; }
+
+/* ---------- sticky header ---------- */
+.top {
+  position: sticky; top: 0; z-index: 20;
+  display: flex; align-items: center; gap: .75rem;
+  padding: calc(env(safe-area-inset-top) + 1.6rem) 0 .85rem;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: saturate(180%) blur(14px);
+  -webkit-backdrop-filter: saturate(180%) blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+/* Index view: the site name is the page's H1, so make it read like one. */
+.top.index h1 { font-size: 1.5rem; font-weight: 720; letter-spacing: -.015em; }
+.top h1 { font-size: 1.02rem; margin: 0; font-weight: 640; letter-spacing: .01em; }
+/* Breadcrumb label on report pages: truncates instead of wrapping the bar. */
+.top .crumb {
+  font-size: .95rem; margin: 0; font-weight: 600; color: var(--fg-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
+}
+.top a.home {
+  color: var(--accent); text-decoration: none; font-weight: 600;
+  font-size: .95rem; white-space: nowrap;
+  /* 44px min touch target per Apple HIG. */
+  min-height: 44px; display: inline-flex; align-items: center;
+}
+.spacer { flex: 1; }
+
+/* ---------- list view ---------- */
+/* Leading magnifier icon: an inline SVG background keeps the CSP free of
+   external requests while giving the field a real affordance. */
+.searchwrap { position: relative; margin: 1.5rem 0 .9rem; }
+.searchwrap::before {
+  content: ""; position: absolute; left: .85rem; top: 50%;
+  transform: translateY(-50%); width: 1.05rem; height: 1.05rem;
+  pointer-events: none; opacity: .55;
+  background: currentColor;
+  -webkit-mask: var(--mag) center / contain no-repeat;
+  mask: var(--mag) center / contain no-repeat;
+}
+:root {
+  --mag: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4.3-4.3"/></svg>');
+}
+.search {
+  width: 100%; font: inherit; font-size: 1rem;
+  padding: .55rem .9rem .55rem 2.5rem;
+  min-height: 46px;
+  background: var(--bg-elev); color: var(--fg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  -webkit-appearance: none;
+}
+.search::placeholder { color: var(--fg-faint); }
+.search:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+.count { color: var(--fg-faint); font-size: .82rem; margin: 0 0 .8rem; }
+ul.reports { list-style: none; margin: 0; padding: 0; }
+ul.reports li { margin-bottom: .7rem; }
+a.card {
+  display: block; text-decoration: none; color: inherit;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: .95rem 2rem .95rem 1.05rem;
+  position: relative;
+  transition: transform .12s ease, border-color .12s ease, background .12s ease;
+}
+/* Chevron signals "this whole row is a link". */
+a.card::after {
+  content: "›"; position: absolute; right: .9rem; top: 50%;
+  transform: translateY(-50%); color: var(--fg-faint);
+  font-size: 1.4rem; line-height: 1; font-weight: 400;
+}
+a.card:hover { border-color: var(--accent); background: var(--bg-sunken); }
+a.card:hover::after { color: var(--accent); }
+a.card:active { transform: scale(.985); border-color: var(--accent); }
+a.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+a.card .t { font-weight: 640; font-size: 1.02rem; line-height: 1.45; display: block; }
+a.card .s {
+  color: var(--fg-muted); font-size: .89rem; line-height: 1.6;
+  margin-top: .3rem; display: -webkit-box; -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical; overflow: hidden;
+}
+a.card .m {
+  margin-top: .6rem; display: flex; flex-wrap: wrap; gap: .45rem .7rem;
+  align-items: center; font-size: .79rem; color: var(--fg-faint);
+}
+.tag {
+  background: var(--accent-soft); color: var(--accent);
+  padding: .16rem .62rem; border-radius: 999px;
+  font-size: .75rem; font-weight: 600; line-height: 1.6;
+}
+.empty {
+  text-align: center; color: var(--fg-faint);
+  padding: 3.5rem 1rem; line-height: 1.9;
+}
+
+/* ---------- report view ---------- */
+.meta {
+  color: var(--fg-faint); font-size: .84rem;
+  display: flex; flex-wrap: wrap; gap: .4rem .6rem;
+  align-items: center; margin: 1.4rem 0 .5rem;
+}
+.report h1:first-of-type { margin-top: .3rem; }
+/* h1 must clearly dominate: at 1.62rem it sat only ~5px above h2 and the
+   document title read as just another section. */
+.report h1 { font-size: 1.95rem; line-height: 1.32; font-weight: 700; letter-spacing: -.015em; }
+.report h2 {
+  font-size: 1.28rem; line-height: 1.4; margin-top: 2.4rem;
+  padding-bottom: .3rem; border-bottom: 1px solid var(--border); font-weight: 680;
+}
+.report h3 { font-size: 1.08rem; margin-top: 1.8rem; font-weight: 660; }
+.report h1, .report h2, .report h3 { scroll-margin-top: 4.5rem; }
+.report p { margin: 1.05rem 0; }
+.report a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+.report ul, .report ol { padding-left: 1.4rem; }
+.report li { margin: .4rem 0; }
+.report img { max-width: 100%; height: auto; border-radius: 8px; display: block; }
+.report blockquote {
+  margin: 1.2rem 0; padding: .1rem 1rem;
+  border-left: 3px solid var(--accent); color: var(--fg-muted);
+  background: var(--bg-elev); border-radius: 0 8px 8px 0;
+}
+.report code {
+  font-family: var(--mono); font-size: .88em;
+  background: var(--bg-sunken); padding: .12em .38em; border-radius: 5px;
+}
+.report pre {
+  background: var(--bg-sunken); border: 1px solid var(--border);
+  padding: .9rem 1rem; border-radius: var(--radius);
+  overflow-x: auto; -webkit-overflow-scrolling: touch;
+  font-size: .84rem; line-height: 1.65;
+}
+.report pre code { background: none; padding: 0; font-size: inherit; }
+.report hr { border: none; border-top: 1px solid var(--border); margin: 2.2rem 0; }
+/* Tables are the #1 mobile layout breaker: wrap in a scroll container. */
+.report .tw { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1.3rem 0; }
+.report table { border-collapse: collapse; width: 100%; font-size: .88rem; }
+.report th, .report td {
+  border: 1px solid var(--border); padding: .5rem .7rem;
+  text-align: left; vertical-align: top;
+}
+.report th { background: var(--bg-elev); font-weight: 650; white-space: nowrap; }
+
+/* ---------- design-system components ----------
+   Vocabulary authored reports may use. Defined here, never by the report:
+   see DESIGN.md and the kiroku-report skill. */
+
+/* Category kicker above the h1. */
+.report .eyebrow {
+  font-size: .72rem; font-weight: 700; letter-spacing: .08em;
+  color: var(--fg-faint); text-transform: none;
+  margin: 0 0 .35rem;
+}
+
+/* One-sentence finding under the h1. Was 1.06rem, indistinguishable from body
+   text at 17px — the distinction rested on color alone. */
+.report .lede {
+  font-size: 1.18rem; color: var(--fg-muted); line-height: 1.7;
+  margin: .55rem 0 1.7rem;
+}
+
+/* Stat block. Numbers the reader will look for twice. */
+.report .figures {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 1.5rem 0 1.8rem;
+}
+.report .figure { background: var(--bg); padding: .85rem .9rem; }
+.report .figure-label {
+  font-size: .72rem; font-weight: 700; letter-spacing: .06em;
+  color: var(--fg-faint); margin-bottom: .3rem;
+}
+.report .figure-value {
+  font-family: var(--mono);
+  font-size: 1.5rem; font-weight: 600; line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+  color: var(--fg);
+}
+.report .figure-value .unit {
+  font-size: .8rem; font-weight: 400; color: var(--fg-faint); margin-left: .15em;
+}
+.report .figure-delta { font-size: .76rem; margin-top: .25rem; color: var(--fg-faint); }
+.report .figure-delta.up { color: var(--positive); }
+.report .figure-delta.down { color: var(--critical); }
+
+/* Emphasis block. At most one per section. */
+.report .callout {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: .9rem 1rem;
+  margin: 1.5rem 0;
+  background: var(--bg-elev);
+}
+.report .callout > :first-child { margin-top: 0; }
+.report .callout > :last-child { margin-bottom: 0; }
+.report .callout.warn {
+  background: var(--caution-bg);
+  border-color: color-mix(in srgb, var(--caution) 35%, transparent);
+  color: var(--caution);
+}
+.report .callout.critical {
+  background: var(--critical-bg);
+  border-color: color-mix(in srgb, var(--critical) 35%, transparent);
+  color: var(--critical);
+}
+
+/* Right-aligned numeric column, tabular so ledger columns line up. */
+.report th.num, .report td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Provenance line. A report without sources is an opinion. */
+.report .source {
+  font-size: .82rem; color: var(--fg-faint); line-height: 1.7;
+  border-top: 1px solid var(--border);
+  padding-top: .9rem; margin-top: 2.4rem;
+}
+
+/* Japanese has no true italic, so a slanted kana run looks like a rendering
+   fault. Render <em> as 傍点 instead and keep italic for Latin only.
+   The dots sit above the glyphs and overflow the line box, colliding with the
+   line above; the padding restores the rhythm without touching other lines. */
+.report em {
+  font-style: normal;
+  -webkit-text-emphasis: dot;
+  text-emphasis: dot;
+  -webkit-text-emphasis-position: over right;
+  text-emphasis-position: over right;
+  line-height: 2.15;
+}
+.report p:has(em) { line-height: 2.15; }
+.report em:lang(en) {
+  font-style: italic;
+  text-emphasis: none;
+  -webkit-text-emphasis: none;
+  line-height: inherit;
+}
+
+/* ---------- viewer-drawn figures ----------
+   The report supplies numbers via data-*; these rules and FIGURE_JS draw them.
+   Same chart look in every report, which per-report CSS could never give.
+   All motion is gated behind prefers-reduced-motion. */
+
+/* Shared figure frame: caption above, content below, hairline border. */
+.report figure.viz {
+  margin: 1.8rem 0;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg);
+  overflow: hidden;
+}
+.report figure.viz > figcaption {
+  font-size: .74rem; font-weight: 700; letter-spacing: .07em;
+  color: var(--fg-faint);
+  padding: .7rem .9rem .6rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+.report figure.viz .vizbody { padding: .95rem .9rem 1rem; }
+.report figure.viz .note {
+  font-size: .76rem; color: var(--fg-faint); line-height: 1.6;
+  padding: 0 .9rem .85rem;
+}
+
+/* --- horizontal bars: the workhorse for "compare these magnitudes" --- */
+.report .bars { display: grid; gap: .7rem; }
+.report .bar { display: grid; grid-template-columns: 1fr auto; gap: .15rem .6rem; }
+.report .bar .blabel {
+  font-size: .84rem; color: var(--fg); grid-column: 1;
+  overflow-wrap: anywhere;
+}
+.report .bar .bval {
+  font-family: var(--mono); font-size: .84rem; font-variant-numeric: tabular-nums;
+  color: var(--fg-muted); grid-column: 2; white-space: nowrap;
+}
+.report .bar .btrack {
+  grid-column: 1 / -1;
+  height: 8px; border-radius: 999px;
+  background: var(--bg-sunken);
+  overflow: hidden;
+}
+.report .bar .bfill {
+  display: block; height: 100%; border-radius: 999px;
+  background: var(--accent);
+  /* Set by FIGURE_JS; starts at 0 so the grow animation has somewhere to go. */
+  width: 0;
+  transition: width .9s cubic-bezier(.22, .61, .36, 1);
+}
+.report .bar[data-tone="positive"] .bfill { background: var(--positive); }
+.report .bar[data-tone="caution"]  .bfill { background: var(--caution); }
+.report .bar[data-tone="critical"] .bfill { background: var(--critical); }
+
+/* Scale footer: without it a bar that stops at 85% looks like a bug rather than
+   a value measured against a declared ceiling. */
+.report .bars + .scale,
+.report .scale {
+  display: flex; justify-content: space-between;
+  margin-top: .55rem; padding-top: .4rem;
+  border-top: 1px solid var(--border);
+  font-size: .7rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- sparkline: trend shape, not precise values --- */
+.report .spark { display: block; width: 100%; height: 58px; overflow: visible; }
+.report .spark .sline {
+  fill: none; stroke: var(--accent); stroke-width: 2;
+  stroke-linecap: round; stroke-linejoin: round;
+  /* Drawn on reveal by animating the dash offset. */
+  stroke-dasharray: var(--len) var(--len);
+  stroke-dashoffset: var(--len);
+  transition: stroke-dashoffset 1.1s ease-out;
+}
+.report .spark .sarea { fill: var(--accent-soft); opacity: 0; transition: opacity .8s ease-out .3s; }
+.report .spark .sdot { fill: var(--accent); opacity: 0; transition: opacity .3s ease-out .9s; }
+.report .spark .sbase { stroke: var(--border); stroke-width: 1; }
+.report .sparkfoot {
+  display: flex; justify-content: space-between;
+  font-size: .72rem; color: var(--fg-faint); margin-top: .3rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- timeline / process: ordered steps with state --- */
+.report ol.timeline { list-style: none; margin: 0; padding: 0; }
+/* A timeline used directly in the article (not wrapped in figure.viz) needs its
+   own frame, or the container rhythm breaks halfway down the page. */
+.report > ol.timeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin: 1.8rem 0; padding: 1rem 1rem .3rem;
+}
+.report ol.timeline > li {
+  position: relative;
+  padding: 0 0 1.05rem 1.6rem;
+  margin: 0;
+}
+.report ol.timeline > li::before {
+  content: ""; position: absolute; left: 0; top: .42rem;
+  width: 9px; height: 9px; border-radius: 50%;
+  background: var(--bg); border: 2px solid var(--border);
+  z-index: 1;
+}
+/* Connector runs between dots, stopping at the last item. */
+.report ol.timeline > li:not(:last-child)::after {
+  content: ""; position: absolute;
+  left: 4px; top: 1.15rem; bottom: -.1rem;
+  width: 1px; background: var(--border);
+}
+.report ol.timeline > li[data-state="done"]::before {
+  background: var(--accent); border-color: var(--accent);
+}
+.report ol.timeline > li[data-state="active"]::before {
+  background: var(--bg); border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.report ol.timeline .tstep { font-weight: 660; font-size: .95rem; }
+.report ol.timeline .tmeta {
+  font-size: .78rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+.report ol.timeline > li[data-state="todo"] .tstep { color: var(--fg-muted); }
+
+/* --- two-column comparison: "A vs B" without a table --- */
+.report .versus {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 1.8rem 0;
+}
+.report .versus > div { background: var(--bg); padding: .85rem .9rem; }
+/* Inside figure.viz the card already provides the frame; avoid a double border. */
+.report figure.viz .versus,
+.report figure.viz ol.timeline {
+  border: none; border-radius: 0; margin: 0; padding: 0;
+}
+.report .versus h4 {
+  margin: 0 0 .45rem; font-size: .8rem; letter-spacing: .04em;
+  color: var(--fg-faint); font-weight: 700;
+}
+.report .versus ul { margin: 0; padding-left: 1.1rem; }
+.report .versus li { font-size: .87rem; margin: .3rem 0; }
+@media (max-width: 30rem) {
+  .report .versus { grid-template-columns: 1fr; }
+}
+
+/* Reveal-on-scroll: content is visible by default and only animates when JS has
+   marked it, so a JS failure degrades to a static, readable figure. */
+.report .reveal { opacity: 1; }
+.report .js .reveal, .js .report .reveal {
+  opacity: 0; transform: translateY(8px);
+  transition: opacity .5s ease-out, transform .5s ease-out;
+}
+.js .report .reveal.in { opacity: 1; transform: none; }
+
+@media (prefers-reduced-motion: reduce) {
+  .report .bar .bfill,
+  .report .spark .sline,
+  .report .spark .sarea,
+  .report .spark .sdot,
+  .js .report .reveal { transition: none; }
+  .js .report .reveal { opacity: 1; transform: none; }
+  .report .spark .sline { stroke-dashoffset: 0; }
+  .report .spark .sarea, .report .spark .sdot { opacity: 1; }
+}
+
+/* ---------- table of contents ---------- */
+details.toc {
+  margin: 1.5rem 0 2rem; background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  padding: .3rem .9rem;
+}
+details.toc > summary {
+  cursor: pointer; font-weight: 640; font-size: .92rem;
+  padding: .6rem 0; list-style: none;
+  display: flex; align-items: center; gap: .5rem;
+}
+details.toc > summary::-webkit-details-marker { display: none; }
+/* A collapsed panel showing only a label reads as an empty broken box — three
+   separate reviews reported this TOC as "empty". The chevron is the affordance
+   that says it opens, and it rotates to show state. */
+details.toc > summary::after {
+  content: "›";
+  margin-left: auto;
+  color: var(--fg-faint);
+  font-size: 1.25rem; line-height: 1;
+  transform: rotate(90deg);
+  transition: transform .15s ease;
+}
+details.toc[open] > summary::after { transform: rotate(-90deg); }
+/* Item count so the reader knows there is something inside before opening. */
+details.toc > summary .n {
+  font-weight: 400; font-size: .82rem; color: var(--fg-faint);
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  details.toc > summary::after { transition: none; }
+}
+details.toc ol { list-style: none; margin: 0 0 .6rem; padding-left: .2rem; }
+details.toc li { margin: .1rem 0; }
+details.toc a {
+  color: var(--fg-muted); text-decoration: none;
+  font-size: .9rem; display: block; padding: .32rem 0;
+}
+details.toc a:active { color: var(--accent); }
+details.toc li.lv3 { padding-left: 1.1rem; font-size: .95em; }
+
+footer {
+  margin: 3.5rem 0 2rem; padding-top: 1.2rem;
+  border-top: 1px solid var(--border);
+  color: var(--fg-faint); font-size: .8rem;
+  display: flex; gap: .8rem; flex-wrap: wrap; align-items: center;
+}
+footer a { color: var(--fg-muted); }
+@media print {
+  .top, details.toc, footer { display: none; }
+  body { font-size: 11pt; }
+  /* Reveal-on-scroll never fires for a print render, so force figures visible.
+     Bar widths still come from JS via beforeprint. */
+  .js .report .reveal { opacity: 1 !important; transform: none !important; }
+  .report figure.viz { break-inside: avoid; }
+  .report .spark .sline { stroke-dashoffset: 0 !important; }
+  .report .spark .sarea, .report .spark .sdot { opacity: 1 !important; }
+}
+</style>
+
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="home" href="/report-viewer/index.html">‹ 一覧</a>
+    <p class="crumb">CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</p>
+    <span class="spacer"></span>
+  </header>
+  
+  <p class="meta">
+    <span>2026/08/05</span>
+    <span class="tag">cost</span><span class="tag">cloudwatch</span><span class="tag">aws</span>
+  </p>
+  <details class="toc"><summary>目次<span class="n">15項目</span></summary><ol>
+  <li class="lv2"><a href="#結論を先に">結論を先に</a></li>
+  <li class="lv2"><a href="#料金の実データ">料金の実データ</a></li>
+  <li class="lv3"><a href="#取り込みcollect-delivery">取り込み（Collect / Delivery）</a></li>
+  <li class="lv3"><a href="#保管とクエリ">保管とクエリ</a></li>
+  <li class="lv2"><a href="#ia-ログクラスの制約">IA ログクラスの制約</a></li>
+  <li class="lv3"><a href="#使えない機能">使えない機能</a></li>
+  <li class="lv3"><a href="#使える機能">使える機能</a></li>
+  <li class="lv3"><a href="#api・iac-上の指定">API・IaC 上の指定</a></li>
+  <li class="lv2"><a href="#どのログタイプに向くか">どのログタイプに向くか</a></li>
+  <li class="lv3"><a href="#二段構成という実装">二段構成という実装</a></li>
+  <li class="lv3"><a href="#失った機能を代替する">失った機能を代替する</a></li>
+  <li class="lv2"><a href="#試算30-tb月の-vended-ログを-90-日保持">試算：30 TB/月の vended ログを 90 日保持</a></li>
+  <li class="lv2"><a href="#アンチパターン">アンチパターン</a></li>
+  <li class="lv2"><a href="#明日から打てる手優先順">明日から打てる手（優先順）</a></li>
+  <li class="lv2"><a href="#参考資料">参考資料</a></li>
+</ol></details>
+  <article class="report">
+<!doctype html>
+
+
+  
+  <title>CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</title>
+
+
+
+<p class="eyebrow">可観測性コスト設計</p>
+<h1 id="cloudwatch-logs-低頻度アクセスログクラスの制約と使いどころ">CloudWatch Logs 低頻度アクセスログクラスの制約と使いどころ</h1>
+<p class="lede">Infrequent Access は「Logs Insights で読むが、リアルタイムに反応しないログ」専用の器であり、取り込み単価を半額にする代償はサブスクリプションフィルタ・メトリクスフィルタ・Live Tail・GetLogEvents の喪失に集約される。</p><div class="figures"><div class="figure"><div class="figure-label">取り込み単価（東京・カスタムログ）</div><div class="figure-value">0.38<span class="unit">USD/GB</span></div>
+    <div class="figure-delta down">Standard 比 −50%</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">保管単価（東京・Standard 階層）</div><div class="figure-value">0.033<span class="unit">USD/GB-月</span></div>
+    <div class="figure-delta up">ログクラスで差なし</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">Logs Insights QL 非対応コマンド</div>
+    <div class="figure-value">4<span class="unit">個</span></div>
+    <div class="figure-delta down">pattern / diff / filterIndex / unmask</div>
+  </div>
+  <div class="figure">
+    <div class="figure-label">ログクラスの事後変更</div>
+    <div class="figure-value">不可</div>
+    <div class="figure-delta down">作り直しのみ</div>
+  </div>
+</div>
+
+<h2 id="結論を先に">結論を先に</h2>
+
+<p>CloudWatch Logs のコスト構造は取り込み・保管・クエリの三つに分解できるが、東京リージョンでは取り込みが圧倒的に支配的である。カスタムログの取り込みは 1 GB あたり 0.76 USD、保管は 1 GB-月あたり 0.033 USD なので、<strong>1 GB を取り込む費用は同じ 1 GB を約 23 か月保管する費用に等しい</strong>。[7] つまり保管側の最適化だけでは請求書は動かない。</p><p>2025 年に追加された Intelligent Tiering は 30 日／90 日アクセスなしでの自動階層化により保管費を下げるが、対象は保管費のみで、取り込み費には一切効かない。[3][6] 取り込み費を下げる手段は、ログクラスを作成時に Infrequent Access（以下 IA）にしておくこと、あるいはそもそも送らないこと、この二つしかない。</p><div class="callout note"><p>IA と Intelligent Tiering は競合しない。<strong>IA は「入口の単価」を半額にする作成時の決定</strong>、<strong>Intelligent Tiering は「置き場の単価」を後から下げるアカウント単位の設定</strong>であり、併用が正解になる場面が多い。</p></div><h2 id="料金の実データ">料金の実データ</h2>
+
+<p>以下は AWS Price List API のオファーファイル（AmazonCloudWatch、ap-northeast-1、公開日 2026-08-03）から取得した実値である。[7] 料金ページの表は JavaScript で描画されるため、請求上の意味（usagetype）まで確認できるオファーファイルを一次情報とした。</p><h3 id="取り込みcollect-delivery">取り込み（Collect / Delivery）</h3><div class="tw"><table><thead><tr><th>区分</th><th>usagetype</th><th class="num">Standard (USD/GB)</th><th class="num">IA (USD/GB)</th><th class="num">差</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>カスタムログ（PutLogEvents）</td><td>DataProcessing[IA]-Bytes</td><td class="num">0.76</td><td class="num">0.38</td><td class="num">−50%</td></tr>
+    <tr><td>Vended ログ最初の 10 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.76</td><td class="num">0.38</td><td class="num">−50%</td></tr>
+    <tr><td>Vended ログ次の 20 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.38</td><td class="num">0.228</td><td class="num">−40%</td></tr>
+    <tr><td>Vended ログ次の 20 TB</td><td>VendedLog[IA]-Bytes</td><td class="num">0.152</td><td class="num">0.114</td><td class="num">−25%</td></tr>
+    <tr><td>Vended ログ 50 TB 超</td><td>VendedLog[IA]-Bytes</td><td class="num">0.076</td><td class="num">0.076</td><td class="num">0%</td></tr>
+  </tbody>
+</table></div>
+
+<p>単純な「IA は半額」は<strong>カスタムログと 10 TB 以下の vended ログにのみ成り立つ</strong>。vended ログは階層ごとに割引率が縮小し、50 TB を超えた帯域では Standard と IA の単価が一致する。月間 80 TB 規模になると IA の削減効果は 37% まで落ちる。CloudFront ログ（CFLogs）は独立した単価体系で、最初の 10 TB が Standard 0.50 / IA 0.25 USD/GB である。[7]</p>
+
+<h3 id="保管とクエリ">保管とクエリ</h3>
+
+<div class="tw"><table>
+  <thead>
+    <tr><th>区分</th><th>usagetype</th><th class="num">東京 (USD)</th><th class="num">バージニア北部 (USD)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>保管 Standard 階層</td><td>TimedStorage-ByteHrs</td><td class="num">0.033 /GB-月</td><td class="num">0.030 /GB-月</td></tr>
+    <tr><td>保管 Infrequent Access 階層</td><td>TimedStorage-IA-ByteHrs</td><td class="num">0.0198 /GB-月</td><td class="num">0.018 /GB-月</td></tr>
+    <tr><td>保管 Archive Instant Access 階層</td><td>TimedStorage-AIA-ByteHrs</td><td class="num">0.0066 /GB-月</td><td class="num">0.006 /GB-月</td></tr>
+    <tr><td>Logs Insights スキャン</td><td>DataScanned-Bytes</td><td class="num">0.0076 /GB</td><td class="num">0.005 /GB</td></tr>
+    <tr><td>取り込み（カスタム・Standard クラス）</td><td>DataProcessing-Bytes</td><td class="num">0.76 /GB</td><td class="num">0.50 /GB</td></tr>
+  </tbody>
+</table></div>
+
+<p>保管の三階層は Intelligent Tiering の階層名であり、ログクラスとは別軸である。<strong>ログクラスは保管単価に影響しない</strong>ことが公式ドキュメントに明記されている。[1] 東京の取り込みはバージニア北部の 1.52 倍で、保管の 1.10 倍・スキャンの 1.52 倍と比べても取り込みの地域差が最も体感しやすい。</p><figure class="viz"><figcaption>月間取り込み費用（東京・vended ログ・階層料金適用後）</figcaption><div class="vizbody"><div class="bars" data-max="22000" data-label="USD/月"><div class="bar" data-value="3891"><span class="blabel">5 TB / Standard</span><span class="bval">3,891</span></div>
+      <div class="bar" data-value="1946" data-tone="positive"><span class="blabel">5 TB / IA</span><span class="bval">1,946</span></div>
+      <div class="bar" data-value="15565"><span class="blabel">30 TB / Standard</span><span class="bval">15,565</span></div>
+      <div class="bar" data-value="8561" data-tone="positive"><span class="blabel">30 TB / IA</span><span class="bval">8,561</span></div>
+      <div class="bar" data-value="21012"><span class="blabel">80 TB / Standard</span><span class="bval">21,012</span></div>
+      <div class="bar" data-value="13230" data-tone="caution"><span class="blabel">80 TB / IA</span><span class="bval">13,230</span></div>
+    </div>
+  </div>
+  <p class="note">[7] の単価に階層境界（最初の10TB／次の20TB／次の20TB／50TB超）を適用した計算値。1 TB = 1,024 GB。5 TB では削減 50%、30 TB で 45%、80 TB で 37% に縮小する。</p></figure><h2 id="ia-ログクラスの制約">IA ログクラスの制約</h2>
+
+<p>制約は公式の機能対応表が正典である。[1] 発表時（2023 年 11 月）のブログの表とは既に差異があり、<strong>データ保護マスキングと取り込み時変換は当時「利用不可」だったが現在は IA でも対応している</strong>。[5][11][1] 発表ブログを根拠に判断すると過剰に制約を見積もることになる。</p><h3 id="使えない機能">使えない機能</h3>
+
+<div class="tw"><table>
+  <thead>
+    <tr><th>失う機能</th><th>実務上の意味</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>サブスクリプションフィルタ</td><td>Kinesis / Firehose / Lambda / OpenSearch への準リアルタイム転送が不可。[8] SIEM や外部 SaaS への配信経路を持てない</td></tr>
+    <tr><td>メトリクスフィルタ</td><td>ログからカスタムメトリクスを抽出できず、<strong>ログ内容に対する CloudWatch アラームが作れない</strong>[9]</td></tr>
+    <tr><td>Live Tail</td><td>障害中の追尾（tail -f 相当）が不可[10]</td></tr>
+    <tr><td>GetLogEvents / FilterLogEvents API</td><td>ログストリームの単純な時系列閲覧ができず、参照は Logs Insights 経由に限定される[1]</td></tr>
+    <tr><td>フィールドインデックス</td><td>既定のインデックスも作成も不可。[16][1] 高頻度クエリでスキャン量を削れない</td></tr>
+    <tr><td>フィールド自動検出（公式記述に矛盾あり）</td><td>ログクラス比較表は IA でも「discovered fields」を対応と記す[1]が、Logs Insights のフィールド解説ページは「フィールド検出は Standard ログクラスのみ」と明記する。[19] 依存する設計にする前に自環境で実測すべき箇所</td></tr>
+    <tr><td>Facets / 自然言語クエリ支援 / 前期間比較</td><td>コンソールの探索支援 UI が縮小する[1]</td></tr>
+    <tr><td>ログ異常検出（Anomaly Detection）</td><td>異常パターンの自動抽出とそれに対するアラームが不可[1]</td></tr>
+    <tr><td>Container Insights / Lambda Insights のログ取り込み</td><td>両 Insights の宛先ロググループには使えない[1]</td></tr>
+    <tr><td>埋め込みメトリクスフォーマット（EMF）</td><td>ログ経由のメトリクス発行が成立しない[1]</td></tr>
+    <tr><td>Logs Insights QL の 4 コマンド</td><td><code>pattern</code>・<code>diff</code>・<code>filterIndex</code>・<code>unmask</code> が非対応。それ以外の全コマンドは使える[2]</td></tr>
+  </tbody>
+</table></div>
+
+<h3 id="使える機能">使える機能</h3>
+
+<div class="versus">
+  <div>
+    <h4>IA でも維持される</h4>
+    <ul>
+      <li>フルマネージドな取り込みと保管[1]</li>
+      <li>Logs Insights QL（上記 4 コマンド以外の全て）[2]</li>
+      <li>OpenSearch PPL / SQL によるクエリ[1]</li>
+      <li>スケジュールドクエリ（S3 / EventBridge / ルックアップテーブルへ結果配信）[1][14]</li>
+      <li>取り込み時変換（CloudWatch Pipeline）[1][12]</li>
+      <li>機密データのマスキング[1][11]</li>
+      <li>KMS による暗号化[1]</li>
+      <li>クロスアカウント分析・集約[1]</li>
+      <li>S3 へのエクスポート／S3 Tables 連携（Iceberg）[1][13]</li>
+    </ul>
+  </div>
+  <div>
+    <h4>設計上の非対称性</h4>
+    <ul>
+      <li>アラームは「ログ内容」からは張れないが、<strong>スケジュールドクエリ + EventBridge</strong> で分単位の準リアルタイム検知は組める[14][15]</li>
+      <li>外部への配信はサブスクリプション（ストリーム型）が使えないため、S3 Tables 連携かスケジュールドクエリ（バッチ型）に置き換える[13][14]</li>
+      <li>フィールドインデックスがないぶんスキャン費が効くので、クエリは必ず時間範囲で絞る</li>
+    </ul>
+  </div>
+</div>
+
+<div class="callout warn">
+  <p>最大の非可逆性は<strong>ログクラスが作成後に変更できない</strong>ことである。[1][4] 判断を誤った場合の是正は、新しいロググループを作って送信先を切り替え、古い方をリテンション満了で枯らす、という移行作業になる。ロググループ名を変えられない事情があるならさらに厄介で、命名規約に世代を含めておくと安全である。</p></div><h3 id="api・iac-上の指定">API・IaC 上の指定</h3>
+
+<p>ログクラスは <code>CreateLogGroup</code> の <code>logGroupClass</code> で指定し、有効値は <code>STANDARD</code> / <code>INFREQUENT_ACCESS</code> / <code>DELIVERY</code> の三つである。省略時は <code>STANDARD</code>。[4] OpenTofu / Terraform では <code>aws_cloudwatch_log_group</code> の <code>log_group_class</code> に対応する。第三の <code>DELIVERY</code> クラスは Lambda ログを S3 / Firehose へ中継する専用で、CloudWatch Logs 内の保持は固定 2 日（API リファレンスは 1 日と記述しており記述に揺れがある）、Logs Insights も使えないため、本レポートの選択肢には含めない。[1][4]</p>
+
+<p>IA ログクラスは中国および GovCloud を除く全リージョンで利用可能。[5] Intelligent Tiering は中東（バーレーン）と中東（UAE）を除く全商用リージョンで、アカウント×リージョン単位で <code>PutStorageTierPolicy</code>（CLI では <code>aws logs put-storage-tier-policy --storage-tier INTELLIGENT_TIERING</code>）で有効化する。[3]</p>
+
+<h2 id="どのログタイプに向くか">どのログタイプに向くか</h2>
+
+<p>公式の指針は明快で、AWS 自身が「IA は機能が少ないが<strong>大多数のユースケースに適する</strong>」とコスト最適化ガイドで述べている。[6] 発表ブログはより具体的に、デバッグログ・Web サーバログ・IoT フリートの詳細ログ・コンプライアンス保持用ログを挙げている。[5] これを判定基準に落とすと、次の三つの問いに全て「いいえ」なら IA が正解になる。</p><ol><li>このログの内容を条件にアラームを鳴らす必要があるか（メトリクスフィルタ／異常検出）</li><li>このログを外部システムへストリームとして流す必要があるか（サブスクリプションフィルタ）</li><li>障害対応中にこのログを Live Tail で追う運用があるか</li>
+</ol>
+
+<div class="tw"><table>
+  <thead>
+    <tr><th>ログタイプ</th><th>判定</th><th>根拠</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>VPC フローログ</td><td>IA 推奨</td><td>量が最も出るうえ、用途は事後のフォレンジックと通信経路の裏取り。閾値監視は CloudWatch メトリクス側で足りる</td></tr>
+    <tr><td>ALB / NLB / CloudFront アクセスログ</td><td>IA 推奨</td><td>可用性監視は ELB メトリクスが担当。ログは事後の 5xx 追跡やボット分析で、Logs Insights の集計だけで完結する</td></tr>
+    <tr><td>WAF ログ</td><td>条件付き IA</td><td>ブロック傾向の分析は IA で十分。ただし特定シグネチャの即時 SOC 連携が要件なら Standard（サブスクリプション必須）</td></tr><tr><td>アプリの DEBUG / TRACE レベル</td><td>IA 推奨</td><td>発表ブログが名指しする代表例。[5] ERROR 以上を別ロググループの Standard に分離し、DEBUG 以下を IA に落とす二段構成が最も費用対効果が高い</td></tr>
+    <tr><td>アプリの ERROR / WARN レベル</td><td>Standard</td><td>メトリクスフィルタでエラー率をアラーム化する対象。量も少ないので IA にする旨みがない</td></tr>
+    <tr><td>監査・コンプライアンス保持ログ</td><td>IA 推奨</td><td>照会頻度が低く長期保持。[5] Intelligent Tiering と併用すれば 90 日後に保管費も最安階層へ落ちる[3]</td></tr>
+    <tr><td>IoT / エッジデバイスの詳細ログ</td><td>IA 推奨</td><td>台数×verbose で量が支配的、参照は事後のフォレンジック[5]</td></tr>
+    <tr><td>バッチ・ETL のジョブ実行ログ</td><td>IA 推奨</td><td>失敗検知はジョブ側の状態遷移イベントで取れる。ログは原因調査時のみ読む</td></tr>
+    <tr><td>RDS / Aurora の一般ログ・スロークエリログ</td><td>IA 推奨</td><td>スロークエリ分析は Logs Insights の集計クエリで完結。Database Insights が別途メトリクスを持つ</td></tr>
+    <tr><td>EKS / ECS コンテナ標準出力（Container Insights 経由）</td><td>Standard 必須</td><td>Container Insights のログ取り込みが IA 非対応[1]</td></tr>
+    <tr><td>Lambda 関数ログ</td><td>Standard 寄り</td><td>Lambda Insights が IA 非対応[1]。EMF でメトリクスを出す実装なら IA では成立しない</td></tr>
+    <tr><td>CloudTrail 管理イベント</td><td>Standard</td><td>危険 API 呼び出しのメトリクスフィルタ + アラームが CIS 系ベンチマークの定番要件</td></tr>
+    <tr><td>EMF でメトリクスを埋め込むログ</td><td>Standard 必須</td><td>EMF が IA 非対応[1]</td></tr>
+  </tbody>
+</table></div>
+
+<h3 id="二段構成という実装">二段構成という実装</h3>
+
+<p>単一のログストリームを丸ごとどちらかに寄せる必要はない。実務で最も効くのは<strong>重要度でロググループを分割する</strong>設計である。ERROR 以上を Standard の小さなロググループへ、INFO 以下を IA の大きなロググループへ送れば、アラームとサブスクリプションは前者に、量は後者に集まる。CloudWatch エージェントや Fluent Bit の出力設定で分岐でき、アプリ側の変更は不要な場合が多い。</p><p>Vended ログは送信先ロググループを IA で作成しておけばよく、請求は <code>VendedLogIA-Bytes</code> として計上される。[6] なお、ログを CloudWatch Logs ではなく S3 や Firehose へ直送してもデリバリ課金（<code>S3-Egress-Bytes</code> / <code>FH-Egress-Bytes</code>）は発生するため、「S3 に直送すればタダ」ではないことに注意する。[18]</p>
+
+<h3 id="失った機能を代替する">失った機能を代替する</h3>
+
+<div class="tw"><table>
+  <thead>
+    <tr><th>Standard の機能</th><th>IA での代替</th><th>差分</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>メトリクスフィルタ + アラーム</td><td>スケジュールドクエリ（最短 15 分間隔の cron）+ EventBridge → Lambda / SNS[14][15]</td><td>検知遅延が秒から分に。異常検知は自前のクエリ条件になる</td></tr>
+    <tr><td>サブスクリプションフィルタ → OpenSearch / SIEM</td><td>S3 Tables 連携（Iceberg）で Athena / Redshift から参照[13]</td><td>ストリームからバッチへ。S3 Tables 連携自体は追加料金なし[13]</td></tr>
+    <tr><td>サブスクリプションフィルタ → Lambda 加工</td><td>取り込み時変換（CloudWatch Pipeline）で事前整形[12]</td><td>取り込み後の再加工はできない。変換は不可逆[12]</td></tr>
+    <tr><td>Live Tail</td><td>短い時間範囲の Logs Insights を反復</td><td>リアルタイム性は失われる。Standard の小さなロググループを併設する方が実用的</td></tr>
+    <tr><td>FilterLogEvents による単純検索</td><td>Logs Insights の <code>filter</code></td><td>スキャン量課金（東京 0.0076 USD/GB）が発生する[7]</td></tr>
+  </tbody>
+</table></div>
+
+<p>S3 への定期エクスポートを恒常的なアーカイブ手段にするのは AWS 自身が非推奨としており、代替としてサブスクリプションを推奨している。[17] IA ではそのサブスクリプションが使えないため、<strong>アーカイブ目的なら S3 に逃がすのではなく、IA + Intelligent Tiering で CloudWatch Logs に置いたまま長期保持する</strong>のが素直な構成になる。</p><h2 id="試算30-tb月の-vended-ログを-90-日保持">試算：30 TB/月の vended ログを 90 日保持</h2>
+
+<p>東京リージョン、VPC フローログ等の vended ログを月 30 TB 取り込み、リテンション 90 日で定常状態（保管 90 TB）とした場合の月額を、階層料金を適用して算出する。前提として 1 TB = 1,024 GB、圧縮率は考慮しない（AWS の課金対象バイト数をそのまま用いる）。</p><div class="tw"><table><thead><tr><th>構成</th><th class="num">取り込み (USD/月)</th><th class="num">保管 (USD/月)</th><th class="num">合計 (USD/月)</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Standard クラス + Standard 保管</td><td class="num">15,564.80</td><td class="num">3,041.28</td><td class="num">18,606.08</td></tr>
+    <tr><td>IA クラス + Intelligent Tiering（90 日後 AIA 階層）</td><td class="num">8,560.64</td><td class="num">608.26</td><td class="num">9,168.90</td></tr>
+    <tr><td>差分</td><td class="num">−7,004.16</td><td class="num">−2,433.02</td><td class="num">−9,437.18</td></tr>
+  </tbody>
+</table></div>
+
+<p>取り込み内訳は Standard が 10 TB×0.76 + 20 TB×0.38 = 7,782.40 + 7,782.40、IA が 10 TB×0.38 + 20 TB×0.228 = 3,891.20 + 4,669.44 である。保管は全量が最安階層に落ちた理想状態を仮定しており（90 TB × 0.0066）、実際には直近 30 日分が Standard 階層に残るため保管費はこれより高くなる。<strong>この保管側の仮定は筆者の単純化であり、下限値である。</strong>それでも削減額の 74% が取り込み側から出ており、取り込み単価が支配的という冒頭の主張はこの試算でも変わらない。年額換算で約 113,246 USD の差になる。</p><h2 id="アンチパターン">アンチパターン</h2>
+
+<ul>
+  <li><strong>Intelligent Tiering を有効化したから取り込みも安くなったと考える。</strong>階層化は保管費のみに作用する[3]</li>
+  <li><strong>全ロググループを一律 IA にする。</strong>CloudTrail や ERROR ログのアラームが静かに作れなくなり、後戻りには作り直しが必要[1][4]</li>
+  <li><strong>EMF を使っているアプリのログを IA に送る。</strong>メトリクスが出なくなる[1]</li>
+  <li><strong>IA で節約した分をスキャン費で溶かす。</strong>フィールドインデックスが使えない[16]ため、時間範囲を絞らないダッシュボードクエリのコストが跳ねる</li>
+  <li><strong>Intelligent Tiering 環境で不要なクエリを回す。</strong>StartQuery / FilterLogEvents / GetLogEvents / CreateExportTask はアクセスと見なされ、下位階層のデータが 30 日間 Standard 階層に戻る[3]</li>
+  <li><strong>2023 年の発表ブログの機能表を現在の制約として使う。</strong>マスキングと取り込み時変換は既に IA 対応済み[1][5][11]</li>
+</ul>
+
+<h2 id="明日から打てる手優先順">明日から打てる手（優先順）</h2><ol><li>Cost and Usage Report で <code>DataProcessing-Bytes</code> / <code>VendedLog-Bytes</code> の上位ロググループを特定する。usagetype 名は[6]の対応表にある通りで、IA へ移った分は <code>DataProcessingIA-Bytes</code> / <code>VendedLogIA-Bytes</code> に現れるので移行効果もそのまま検証できる</li>
+  <li>上位ロググループごとに前掲の三つの問い（アラーム／外部ストリーム／Live Tail）を通す。全て「いいえ」なら IA 候補</li>
+  <li>Intelligent Tiering をアカウント×リージョン単位で有効化する。取り込み側の判断とは独立に、保管費だけが下がる。<code>StoredBytes</code>メトリクスの <code>StorageType</code> ディメンションで階層別の内訳を可視化できる（日次発行）[3]</li>
+  <li>新規ワークロードは最初から IA で作る。既存の是正は作り直しになるので、新設分の判断を誤らないことが最も効く</li>
+  <li>アプリログは重要度でロググループを分割する。ERROR 以上を Standard、INFO 以下を IA</li>
+  <li>IA へ移すロググループのうちアラームが必要だったものは、スケジュールドクエリ + EventBridge へ置き換える[14][15]</li>
+</ol>
+
+<h2 id="参考資料">参考資料</h2>
+
+<ol>
+  <li>Log classes - Amazon CloudWatch Logs — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch_Logs_Log_Classes.html</a></li>
+  <li>Logs Insights QL commands supported in log classes — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData_Classes.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData_Classes.html</a></li>
+  <li>Optimize storage costs with CloudWatch Logs Intelligent Tiering — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cwl_intelligent_tier.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/cwl_intelligent_tier.html</a></li>
+  <li>CreateLogGroup API Reference — <a href="https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatchLogs/latest/APIReference/API_CreateLogGroup.html</a></li>
+  <li>New Amazon CloudWatch log class for infrequent access logs at a reduced price (AWS News Blog, 2023-11-26) — <a href="https://aws.amazon.com/blogs/aws/new-amazon-cloudwatch-log-class-for-infrequent-access-logs-at-a-reduced-price" target="_blank" rel="noopener noreferrer nofollow">https://aws.amazon.com/blogs/aws/new-amazon-cloudwatch-log-class-for-infrequent-access-logs-at-a-reduced-price</a></li>
+  <li>CloudWatch billing and cost (usage types) — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/cloudwatch_billing.html</a></li>
+  <li>AWS Price List API - AmazonCloudWatch ap-northeast-1 offer file — <a href="https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/ap-northeast-1/index.json" target="_blank" rel="noopener noreferrer nofollow">https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonCloudWatch/current/ap-northeast-1/index.json</a></li>
+  <li>Subscription filters — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Subscriptions.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/Subscriptions.html</a></li>
+  <li>Metric filters — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/MonitoringLogData.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/MonitoringLogData.html</a></li>
+  <li>Troubleshoot with CloudWatch Logs Live Tail — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html</a></li>
+  <li>Help protect sensitive log data with masking — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/mask-sensitive-log-data.html</a></li>
+  <li>Transform logs during ingestion — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatch-Logs-Transformation.html</a></li>
+  <li>Access logs with S3 Tables Integration — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/s3-tables-integration.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/s3-tables-integration.html</a></li>
+  <li>Automating log analysis with scheduled queries — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/ScheduledQueries.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/ScheduledQueries.html</a></li>
+  <li>Understanding scheduled queries concepts — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/scheduled-queries-concepts.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/scheduled-queries-concepts.html</a></li>
+  <li>Create field indexes to improve query performance and reduce scan volume — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs-Field-Indexing.html</a></li>
+  <li>Exporting log data to Amazon S3 — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/S3Export.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/S3Export.html</a></li>
+  <li>Enable logging from AWS services (vended logs) — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/aws-services-sending-logs.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/aws-services-sending-logs.html</a></li>
+  <li>Supported logs and discovered fields — <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html" target="_blank" rel="noopener noreferrer nofollow">https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CWL_AnalyzeLogData-discoverable-fields.html</a></li>
+</ol>
+
+<p class="source">出典: AWS 公式ドキュメントおよび AWS Price List API（AmazonCloudWatch / ap-northeast-1、publicationDate 2026-08-03）。取得日 2026-08-05。試算はいずれも本レポートで明示した前提に基づく計算値であり、AWS が公表した金額ではない。</p>
+
+  </article>
+  <footer>
+    <span>公開プレビュー（認証なし・静的スナップショット）</span>
+  </footer>
+</div>
+<script>
+(function(){
+  var d = document;
+  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  d.documentElement.classList.add('js');
+
+  function num(v){ var n = parseFloat(v); return isFinite(n) ? n : 0; }
+
+  // --- bars: width comes from data-value against the group's max ---
+  Array.prototype.forEach.call(d.querySelectorAll('.report .bars'), function(group){
+    var rows = [].slice.call(group.querySelectorAll('.bar'));
+    var declared = num(group.getAttribute('data-max'));
+    var max = declared > 0 ? declared : rows.reduce(function(m, r){
+      return Math.max(m, num(r.getAttribute('data-value')));
+    }, 0);
+    if (max <= 0) max = 1;
+    rows.forEach(function(r){
+      var track = r.querySelector('.btrack');
+      if (!track) {
+        track = d.createElement('span');
+        track.className = 'btrack';
+        track.appendChild(d.createElement('span')).className = 'bfill';
+        r.appendChild(track);
+      }
+      var fill = track.querySelector('.bfill');
+      var pct = Math.max(0, Math.min(100, (num(r.getAttribute('data-value')) / max) * 100));
+      fill.setAttribute('data-pct', pct);
+      // aria: the bar is decorative; the value is already in .bval text.
+      track.setAttribute('aria-hidden', 'true');
+      if (reduce) fill.style.width = pct + '%';
+    });
+
+    // State the ceiling. A bar stopping at 85% is otherwise indistinguishable
+    // from a rendering bug.
+    if (rows.length && !group.nextElementSibling?.classList.contains('scale')) {
+      var sc = d.createElement('div');
+      sc.className = 'scale';
+      var unit = group.getAttribute('data-label') || '';
+      sc.innerHTML = '<span>0</span><span>' +
+        max.toLocaleString('ja-JP') + (unit ? ' ' + unit : '') + '</span>';
+      group.parentNode.insertBefore(sc, group.nextSibling);
+    }
+  });
+
+  // --- sparklines: replace the placeholder with an SVG path ---
+  Array.prototype.forEach.call(d.querySelectorAll('.report .spark'), function(host){
+    var pts = (host.getAttribute('data-points') || '').split(',')
+      .map(function(s){ return parseFloat(s); })
+      .filter(function(n){ return isFinite(n); });
+    if (pts.length < 2) return;
+
+    var W = 300, H = 58, P = 4;
+    // Extra right inset so the terminal dot does not touch the card padding.
+    var RP = 7;
+    var lo = Math.min.apply(null, pts), hi = Math.max.apply(null, pts);
+    // Anchor the vertical scale at zero unless the series goes negative.
+    // Scaling from the minimum makes a 12->58 rise fill the whole band as if it
+    // climbed from nothing, which exaggerates the slope and misleads.
+    var base = lo < 0 ? lo : 0;
+    var top = hi === base ? base + 1 : hi;
+    var span = top - base;
+    var xy = pts.map(function(v, i){
+      return [
+        P + (i / (pts.length - 1)) * (W - P - RP),
+        P + (1 - (v - base) / span) * (H - P * 2)
+      ];
+    });
+    var line = xy.map(function(p, i){
+      return (i ? 'L' : 'M') + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+    }).join(' ');
+    var area = line + ' L' + xy[xy.length - 1][0].toFixed(1) + ' ' + (H - P) +
+               ' L' + xy[0][0].toFixed(1) + ' ' + (H - P) + ' Z';
+
+    var NS = 'http://www.w3.org/2000/svg';
+    var svg = d.createElementNS(NS, 'svg');
+    svg.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+    svg.setAttribute('preserveAspectRatio', 'none');
+    svg.setAttribute('class', 'spark');
+    svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', host.getAttribute('data-label') || '推移');
+
+    var ap = d.createElementNS(NS, 'path');
+    ap.setAttribute('d', area); ap.setAttribute('class', 'sarea');
+    var lp = d.createElementNS(NS, 'path');
+    lp.setAttribute('d', line); lp.setAttribute('class', 'sline');
+    var last = xy[xy.length - 1];
+    var dot = d.createElementNS(NS, 'circle');
+    dot.setAttribute('cx', last[0].toFixed(1));
+    dot.setAttribute('cy', last[1].toFixed(1));
+    dot.setAttribute('r', '3'); dot.setAttribute('class', 'sdot');
+
+    // Baseline sits at the zero anchor, so the area reads against a real datum.
+    var axis = d.createElementNS(NS, 'line');
+    axis.setAttribute('x1', P); axis.setAttribute('x2', W - RP);
+    axis.setAttribute('y1', H - P); axis.setAttribute('y2', H - P);
+    axis.setAttribute('class', 'sbase');
+
+    svg.appendChild(axis); svg.appendChild(ap); svg.appendChild(lp); svg.appendChild(dot);
+    host.parentNode.replaceChild(svg, host);
+
+    // Axis labels: state the range and the unit, or the shape is decorative.
+    // Ends are marked so 12/58 aren't misread as first/last x values.
+    var unit = host.getAttribute('data-label') || '';
+    var m = unit.match(/[（(]([^）)]+)[）)]s*$/);
+    var suffix = m ? m[1] : '';
+    var foot = d.createElement('div');
+    foot.className = 'sparkfoot';
+    foot.innerHTML = '<span>最小 ' + lo.toLocaleString('ja-JP') + suffix + '</span>' +
+                     '<span>最大 ' + hi.toLocaleString('ja-JP') + suffix + '</span>';
+    svg.parentNode.insertBefore(foot, svg.nextSibling);
+
+    // Dash length must be measured after insertion.
+    var len = lp.getTotalLength ? lp.getTotalLength() : 0;
+    lp.style.setProperty('--len', len);
+    if (reduce) { lp.style.strokeDashoffset = '0'; ap.style.opacity = 1; dot.style.opacity = 1; }
+  });
+
+  // --- reveal on scroll, and trigger the figure animations at that moment ---
+  function activate(el){
+    el.classList.add('in');
+    Array.prototype.forEach.call(el.querySelectorAll('.bfill'), function(f){
+      f.style.width = (f.getAttribute('data-pct') || 0) + '%';
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.sline'), function(l){
+      l.style.strokeDashoffset = '0';
+    });
+    Array.prototype.forEach.call(el.querySelectorAll('.sarea, .sdot'), function(n){
+      n.style.opacity = '1';
+    });
+  }
+
+  var targets = [].slice.call(d.querySelectorAll('.report figure.viz, .report .reveal'));
+  targets.forEach(function(t){ t.classList.add('reveal'); });
+
+  if (reduce || !('IntersectionObserver' in window)) {
+    targets.forEach(activate);
+    return;
+  }
+  var io = new IntersectionObserver(function(entries){
+    entries.forEach(function(e){
+      if (e.isIntersecting) { activate(e.target); io.unobserve(e.target); }
+    });
+  }, { rootMargin: '0px 0px -8% 0px', threshold: 0.15 });
+  targets.forEach(function(t){ io.observe(t); });
+
+  // Safety net: anything still waiting after 2.5s gets activated regardless.
+  // A figure parked at opacity:0 is indistinguishable from a broken chart, and
+  // that is exactly what a full-page screenshot, a print, or a fast scroll past
+  // the observer's threshold produces.
+  setTimeout(function(){
+    targets.forEach(function(t){
+      if (!t.classList.contains('in')) { activate(t); io.unobserve(t); }
+    });
+  }, 2500);
+
+  // Print must never show a blank box.
+  var mql = matchMedia('print');
+  function onPrint(){ targets.forEach(activate); }
+  if (mql.addEventListener) mql.addEventListener('change', onPrint);
+  window.addEventListener('beforeprint', onPrint);
+})();
+</script>
+</body>
+</html>
